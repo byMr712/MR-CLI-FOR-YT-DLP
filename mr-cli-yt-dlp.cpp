@@ -1,0 +1,878 @@
+﻿#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <conio.h>
+#include <windows.h>
+#include <fstream>
+#include <vector>
+#include <sstream>
+#include <direct.h>
+#include <sys/stat.h>
+#include <algorithm>
+#include <shlobj.h>
+#include <commdlg.h>
+#include <locale>
+#include <cctype>
+
+using namespace std;
+
+// ========== CONFIG ==========
+string YTDLP_PATH, FFMPEG_PATH, SCRIPT_DIR, DOWNLOAD_PATH;
+string COOKIES_FILE = "cookies.txt";
+string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
+string AUDIO_FORMAT = "M4A(AAC)";
+bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false;
+bool YTDLP_FOUND = false, FFMPEG_FOUND = false;
+
+// Resume
+string RESUME_URL, RESUME_START, RESUME_END;
+bool RESUME_IS_PLAYLIST = false;
+int RESUME_FAILED_INDEX = -1;
+
+// ========== UTF-8 HELPERS ==========
+string wstringToUtf8(const wstring& wstr) {
+    if (wstr.empty()) return "";
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, NULL, 0, NULL, NULL);
+    string result(size - 1, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &result[0], size, NULL, NULL);
+    return result;
+}
+
+wstring utf8ToWstring(const string& str) {
+    if (str.empty()) return L"";
+    int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, NULL, 0);
+    wstring result(size - 1, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &result[0], size);
+    return result;
+}
+
+// ========== COLORS ==========
+enum Color { BLACK = 0, BLUE = 1, GREEN = 2, RED = 4, YELLOW = 6, WHITE = 7, CYAN = 11 };
+
+void setColor(int c) { SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), c); }
+void printColor(const string& t, int c = WHITE, bool nl = true) {
+    setColor(c); cout << t; setColor(WHITE); if (nl) cout << endl;
+}
+
+// ========== HELPERS ==========
+bool inputWithEscape(string& result, const string& prompt) {
+    cout << prompt;
+    result.clear();
+
+    char ch;
+    while (true) {
+        ch = _getch();
+        if (ch == 27) { // ESC
+            result.clear();
+            return false;
+        }
+        if (ch == '\r') { // Enter
+            cout << endl;
+            return true;
+        }
+        if (ch == '\b' || ch == 127) { // Backspace
+            if (!result.empty()) {
+                result.pop_back();
+                cout << "\b \b";
+            }
+            continue;
+        }
+        if (ch >= 32 && ch <= 126) { // Printable chars
+            result += ch;
+            cout << ch;
+        }
+    }
+}
+
+// Альтернативный вариант с getline и проверкой на ESC
+bool inputLineWithEscape(string& result, const string& prompt) {
+    cout << prompt;
+    result.clear();
+
+    char ch;
+    while (true) {
+        ch = _getch();
+        if (ch == 27) { // ESC
+            result.clear();
+            cout << endl;
+            return false;
+        }
+        if (ch == '\r') { // Enter
+            cout << endl;
+            return true;
+        }
+        if (ch == '\b' || ch == 127) { // Backspace
+            if (!result.empty()) {
+                result.pop_back();
+                cout << "\b \b";
+            }
+            continue;
+        }
+        if (ch >= 32 && ch <= 126) { // Printable chars
+            result += ch;
+            cout << ch;
+        }
+    }
+}
+
+void setUTF8() {
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
+    setlocale(LC_ALL, ".UTF8");
+}
+
+void clearScreen() { system("cls"); }
+void waitForKey() { cout << "\nPress any key..."; (void)_getch(); while (_kbhit()) (void)_getch(); }
+
+char getMenuChoice() {
+    while (_kbhit()) {
+        (void)_getch();
+    }
+    char c = _getch();
+    if (c == 27) return 27; // ESC
+    if (c >= 'A' && c <= 'Z') {
+        c += 32;
+    }
+    return c;
+}
+
+string getScriptDir() {
+    wchar_t buf[MAX_PATH];
+    GetModuleFileNameW(NULL, buf, MAX_PATH);
+    wstring p(buf);
+    size_t pos = p.find_last_of(L"\\/");
+    if (pos != wstring::npos) {
+        return wstringToUtf8(p.substr(0, pos + 1));
+    }
+    return "";
+}
+
+bool fileExists(const string& p) {
+    wstring wp = utf8ToWstring(p);
+    DWORD a = GetFileAttributesW(wp.c_str());
+    return (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+bool dirExists(const string& p) {
+    wstring wp = utf8ToWstring(p);
+    DWORD a = GetFileAttributesW(wp.c_str());
+    return (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+bool createDir(const string& p) {
+    wstring wp = utf8ToWstring(p);
+    return CreateDirectoryW(wp.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+string getEnv(const string& n) {
+    wstring wn = utf8ToWstring(n);
+    wchar_t* b = nullptr;
+    size_t s = 0;
+    if (_wdupenv_s(&b, &s, wn.c_str()) != 0 || !b) return "";
+    wstring r(b);
+    free(b);
+    return wstringToUtf8(r);
+}
+
+bool inPath(const string& f, string& full) {
+    wstring wf = utf8ToWstring(f);
+    wstring pathStr = utf8ToWstring(getEnv("PATH"));
+    wstringstream ss(pathStr);
+    wstring p;
+    while (getline(ss, p, L';')) {
+        wstring testPath = p + L"\\" + wf;
+        DWORD a = GetFileAttributesW(testPath.c_str());
+        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
+            full = wstringToUtf8(testPath);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool parseDownloadLine(const string& line, string& percent, string& speed, string& eta) {
+    if (line.find("[download]") != 0) return false;
+    istringstream iss(line);
+    vector<string> tokens;
+    string tok;
+    while (iss >> tok) tokens.push_back(tok);
+    percent.clear(); speed.clear(); eta.clear();
+    for (size_t i = 0; i < tokens.size(); i++) {
+        if (!tokens[i].empty() && tokens[i].back() == '%')
+            percent = tokens[i].substr(0, tokens[i].size() - 1);
+        if (tokens[i] == "at" && i + 1 < tokens.size())
+            speed = tokens[i + 1];
+        if (tokens[i] == "ETA" && i + 1 < tokens.size())
+            eta = tokens[i + 1];
+    }
+    return !percent.empty();
+}
+
+void printProgressBar(const string& percentStr, const string& speed, const string& eta) {
+    double percent = atof(percentStr.c_str());
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    const int barWidth = 30;
+    int pos = (int)(barWidth * percent / 100.0);
+    string line = "\r[";
+    for (int i = 0; i < barWidth; i++) line += (i < pos) ? '=' : (i == pos ? '>' : ' ');
+    line += "] " + percentStr + "%";
+    if (!speed.empty()) line += "  " + speed;
+    if (!eta.empty()) line += "  ETA " + eta;
+    line += "        ";
+    cout << line << flush;
+}
+
+string findFileRecursive(const string& dir, const string& f) {
+    wstring wdir = utf8ToWstring(dir);
+    wstring wf = utf8ToWstring(f);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((wdir + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return "";
+    do {
+        if (wstring(fd.cFileName) == L"." || wstring(fd.cFileName) == L"..") continue;
+        wstring full = wdir + fd.cFileName;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            string r = findFileRecursive(wstringToUtf8(full + L"\\"), f);
+            if (!r.empty()) { FindClose(h); return r; }
+        }
+        else if (wf == fd.cFileName) { FindClose(h); return wstringToUtf8(full); }
+    } while (FindNextFileW(h, &fd) != 0);
+    FindClose(h);
+    return "";
+}
+
+// ========== CONFIG ==========
+void saveConfig() {
+    string configPath = SCRIPT_DIR + "mr-config.txt";
+    ofstream f(configPath, ios::out | ios::binary);
+    if (!f.is_open()) return;
+    unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+    f.write((char*)bom, sizeof(bom));
+    f << "DOWNLOAD_PATH=" << DOWNLOAD_PATH << "\n"
+        << "COOKIES_FILE=" << COOKIES_FILE << "\n"
+        << "USE_COOKIES=" << (USE_COOKIES ? "true" : "false") << "\n"
+        << "VIDEO_RESOLUTION=" << VIDEO_RESOLUTION << "\n"
+        << "VIDEO_FPS=" << VIDEO_FPS << "\n"
+        << "VIDEO_FORMAT=" << VIDEO_FORMAT << "\n"
+        << "AUDIO_FORMAT=" << AUDIO_FORMAT << "\n"
+        << "CODEC_RECOMPILER=" << (CODEC_RECOMPILER ? "true" : "false") << "\n"
+        << "ONLY_AUDIO=" << (ONLY_AUDIO ? "true" : "false") << "\n"
+        << "ONLY_VIDEO=" << (ONLY_VIDEO ? "true" : "false") << "\n";
+    f.close();
+}
+
+void loadConfig() {
+    string configPath = SCRIPT_DIR + "mr-config.txt";
+
+    if (fileExists(configPath)) {
+        ifstream f(configPath);
+        if (f.is_open()) {
+            string l;
+            while (getline(f, l)) {
+                // Удаляем BOM из первой строки если есть
+                if (l.length() >= 3 && (unsigned char)l[0] == 0xEF &&
+                    (unsigned char)l[1] == 0xBB && (unsigned char)l[2] == 0xBF) {
+                    l = l.substr(3);
+                }
+
+                if (l.find("DOWNLOAD_PATH=") == 0) DOWNLOAD_PATH = l.substr(14);
+                else if (l.find("COOKIES_FILE=") == 0) COOKIES_FILE = l.substr(13);
+                else if (l.find("USE_COOKIES=") == 0) USE_COOKIES = (l.substr(12) == "true");
+                else if (l.find("VIDEO_RESOLUTION=") == 0) VIDEO_RESOLUTION = l.substr(17);
+                else if (l.find("VIDEO_FPS=") == 0) VIDEO_FPS = l.substr(10);
+                else if (l.find("VIDEO_FORMAT=") == 0) VIDEO_FORMAT = l.substr(13);
+                else if (l.find("AUDIO_FORMAT=") == 0) AUDIO_FORMAT = l.substr(13);
+                else if (l.find("CODEC_RECOMPILER=") == 0) CODEC_RECOMPILER = (l.substr(17) == "true");
+                else if (l.find("ONLY_AUDIO=") == 0) ONLY_AUDIO = (l.substr(11) == "true");
+                else if (l.find("ONLY_VIDEO=") == 0) ONLY_VIDEO = (l.substr(11) == "true");
+            }
+            f.close();
+        }
+    }
+
+    // Если DOWNLOAD_PATH не задан - создаем папку в Documents
+    if (DOWNLOAD_PATH.empty()) {
+        wchar_t buf[MAX_PATH];
+        if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, buf))) {
+            wstring wPath = wstring(buf) + L"\\MR-CLI-FOR-YT-DLP\\downloads\\";
+            string path = wstringToUtf8(wPath);
+            if (!dirExists(path)) createDir(path);
+            DOWNLOAD_PATH = path;
+        }
+        else {
+            DOWNLOAD_PATH = "C:\\MR-CLI-FOR-YT-DLP\\downloads\\";
+            if (!dirExists(DOWNLOAD_PATH)) createDir(DOWNLOAD_PATH);
+        }
+        saveConfig();
+    }
+}
+
+// ========== DIALOGS ==========
+string openFolderDialog() {
+    BROWSEINFOW bi = { 0 };
+    bi.lpszTitle = L"Select folder";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+
+    LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
+    if (!pidl) return "";
+
+    wchar_t p[MAX_PATH];
+    if (SHGetPathFromIDListW(pidl, p)) {
+        CoTaskMemFree(pidl);
+        wstring wp(p);
+        if (wp.back() != L'\\') wp += L'\\';
+        return wstringToUtf8(wp);
+    }
+    CoTaskMemFree(pidl);
+    return "";
+}
+
+string openFileDialog() {
+    OPENFILENAMEW ofn = { 0 };
+    wchar_t fn[MAX_PATH] = L"";
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = GetConsoleWindow();
+    ofn.lpstrFilter = L"Text Files\0*.txt\0All Files\0*.*\0";
+    ofn.lpstrFile = fn;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
+    ofn.lpstrTitle = L"Select cookies file";
+
+    if (GetOpenFileNameW(&ofn)) {
+        return wstringToUtf8(wstring(fn));
+    }
+    return "";
+}
+
+string getClipboard() {
+    if (!OpenClipboard(NULL)) return "";
+    HANDLE h = GetClipboardData(CF_UNICODETEXT);
+    if (!h) { CloseClipboard(); return ""; }
+    wchar_t* t = (wchar_t*)GlobalLock(h);
+    if (!t) { CloseClipboard(); return ""; }
+    wstring r(t);
+    GlobalUnlock(h);
+    CloseClipboard();
+    return wstringToUtf8(r);
+}
+
+// ========== COOKIES ==========
+bool validateCookiesContent(const string& c) {
+    if (c.find("# Netscape HTTP Cookie File") != string::npos) return true;
+    stringstream ss(c); string l;
+    while (getline(ss, l)) {
+        if (l.empty() || l[0] == '#') continue;
+        int tabs = 0; for (char ch : l) if (ch == '\t') tabs++;
+        if (tabs >= 5) return true;
+    }
+    return false;
+}
+
+bool validateCookies(const string& p) {
+    ifstream f(p); if (!f.is_open()) return false;
+    string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
+    f.close(); return validateCookiesContent(c);
+}
+
+bool saveCookies(const string& c) {
+    string cookiesPath = SCRIPT_DIR + COOKIES_FILE;
+    ofstream f(cookiesPath); if (!f.is_open()) return false;
+    if (c.find("# Netscape HTTP Cookie File") == string::npos)
+        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.01\n\n";
+    f << c; f.close(); return true;
+}
+
+// ========== MENUS ==========
+string cookieEditor(bool fromSettings = false) {
+    while (true) {
+        clearScreen();
+        printColor("========================================", CYAN);
+        printColor(" COOKIE EDITOR", CYAN);
+        printColor("========================================", CYAN);
+        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n0. "
+            << (fromSettings ? "Return" : "Continue") << "\n\nYour choice: ";
+        char ch = getMenuChoice();
+        if (ch == 27) {
+            cout << "ESC" << endl;
+            return fromSettings ? "settings" : "continue";
+        }
+        cout << ch << endl;
+        switch (ch) {
+        case '1': {
+            string p = openFileDialog();
+            if (!p.empty() && validateCookies(p)) {
+                ifstream f(p); string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>()); f.close();
+                if (saveCookies(c)) { USE_COOKIES = true; saveConfig(); printColor("[OK] Cookies saved!", GREEN); waitForKey(); return fromSettings ? "settings" : "continue"; }
+            }
+            else printColor("[ERROR] Invalid cookies file!", RED);
+            waitForKey(); break;
+        }
+        case '2': {
+            string c = getClipboard();
+            if (c.empty()) { printColor("[ERROR] Clipboard empty!", RED); waitForKey(); break; }
+            if (validateCookiesContent(c) && saveCookies(c)) {
+                USE_COOKIES = true; saveConfig(); printColor("[OK] Cookies saved!", GREEN); waitForKey();
+                return fromSettings ? "settings" : "continue";
+            }
+            printColor("[ERROR] Invalid cookies!", RED); waitForKey(); break;
+        }
+        case '0': return fromSettings ? "settings" : "continue";
+        default: printColor("[ERROR] Invalid choice!", RED); waitForKey();
+        }
+    }
+}
+
+// ========== FORMAT BUILDING ==========
+string buildFormat() {
+    string exactRes, lteRes;
+    if (VIDEO_RESOLUTION == "2160") { exactRes = "height=2160";  lteRes = "height<=2160"; }
+    else if (VIDEO_RESOLUTION == "1440") { exactRes = "height=1440";  lteRes = "height<=1440"; }
+    else if (VIDEO_RESOLUTION == "1080") { exactRes = "height=1080";  lteRes = "height<=1080"; }
+    else if (VIDEO_RESOLUTION == "720") { exactRes = "height=720";   lteRes = "height<=720"; }
+    else if (VIDEO_RESOLUTION == "480") { exactRes = "height=480";   lteRes = "height<=480"; }
+    else if (VIDEO_RESOLUTION == "360") { exactRes = "height=360";   lteRes = "height<=360"; }
+
+    string audioFmt;
+    if (AUDIO_FORMAT.find("M4A") != string::npos) audioFmt = "ba[ext=m4a]";
+    else if (AUDIO_FORMAT.find("Opus") != string::npos) audioFmt = "ba[ext=webm][acodec^=opus]";
+    else if (AUDIO_FORMAT.find("Vorbis") != string::npos) audioFmt = "ba[ext=webm][acodec^=vorbis]";
+
+    string codecFilter;
+    string ext;
+    if (VIDEO_FORMAT.find("MP4(AV1)") != string::npos) { codecFilter = "[vcodec^=av01]"; ext = "[ext=mp4]"; }
+    else if (VIDEO_FORMAT.find("MP4(H.264)") != string::npos) { codecFilter = "[vcodec^=avc1]"; ext = "[ext=mp4]"; }
+    else if (VIDEO_FORMAT.find("WEBM(AV1)") != string::npos) { codecFilter = "[vcodec^=av01]"; ext = "[ext=webm]"; }
+    else if (VIDEO_FORMAT.find("WEBM(VP9)") != string::npos) { codecFilter = "[vcodec^=vp9]";  ext = "[ext=webm]"; }
+
+    string vExactPref = "bv" + ext + codecFilter + "[" + exactRes + "]";
+    string vExactAny = "bv[" + exactRes + "]";
+    string vLtePref = "bv" + ext + codecFilter + "[" + lteRes + "]";
+    string vLteAny = "bv[" + lteRes + "]";
+
+    if (ONLY_AUDIO) return audioFmt + "/bestaudio";
+
+    if (ONLY_VIDEO)
+        return vExactPref + "/" + vExactAny + "/" + vLtePref + "/" + vLteAny + "/bestvideo";
+
+    return vExactPref + "+" + audioFmt + "/" +
+        vExactAny + "+" + audioFmt + "/" +
+        vLtePref + "+" + audioFmt + "/" +
+        vLteAny + "+" + audioFmt + "/best";
+}
+
+// ========== DOWNLOAD ==========
+bool execWithProgress(const string& cmd) {
+    string bat = SCRIPT_DIR + "run.bat";
+    ofstream f(bat);
+    if (!f.is_open()) return false;
+    f << "@echo off\n";
+    f << "chcp 65001 > nul\n";
+    f << cmd << " 2>&1\n";
+    f.close();
+
+    FILE* pipe = _popen(("\"" + bat + "\"").c_str(), "r");
+    if (!pipe) { remove(bat.c_str()); return false; }
+
+    string line;
+    bool progressActive = false;
+    int curItem = 0, totalItems = 0;
+    int c;
+
+    while ((c = fgetc(pipe)) != EOF) {
+        if (c == '\r' || c == '\n') {
+            if (!line.empty()) {
+                string percent, speed, eta;
+
+                if (line.find("[download] Downloading item ") == 0) {
+                    sscanf_s(line.c_str(), "[download] Downloading item %d of %d", &curItem, &totalItems);
+                }
+                else if (line.find("[download] Destination:") == 0) {
+                    string path = line.substr(string("[download] Destination:").length());
+                    while (!path.empty() && path.front() == ' ') path.erase(path.begin());
+                    size_t slash = path.find_last_of("\\/");
+                    string name = (slash != string::npos) ? path.substr(slash + 1) : path;
+                    size_t dot = name.find_last_of('.');
+                    if (dot != string::npos) name = name.substr(0, dot);
+
+                    if (progressActive) { cout << endl; progressActive = false; }
+
+                    string prefix;
+                    if (ONLY_AUDIO) {
+                        prefix = "[Only audio] ";
+                    }
+                    else if (ONLY_VIDEO) {
+                        prefix = "[Only video] ";
+                    }
+                    else {
+                        prefix = "";
+                    }
+
+                    if (totalItems > 0)
+                        printColor(prefix + "Downloading " + to_string(curItem) + " of " + to_string(totalItems) + " - " + name, CYAN);
+                    else
+                        printColor(prefix + "Downloading into \"" + path + "\"", CYAN);
+                }
+                else if (line.find("[Merger] Merging formats into") == 0) {
+                    if (progressActive) { cout << endl; progressActive = false; }
+                    string path = line.substr(string("[Merger] Merging formats into").length());
+                    while (!path.empty() && path.front() == ' ') path.erase(path.begin());
+                    if (!path.empty() && path.back() == '"') path.pop_back();
+                    printColor("[Merger] Merging formats into \"" + path + "\"", CYAN);
+                    cout << endl;
+                }
+                else if (parseDownloadLine(line, percent, speed, eta)) {
+                    printProgressBar(percent, speed, eta);
+                    progressActive = true;
+                }
+                else if (line.find("[Merger]") == 0 || line.find("[ExtractAudio]") == 0 ||
+                    line.find("[VideoConvertor]") == 0 || line.find("[Fixup") == 0) {
+                    if (progressActive) { cout << endl << endl; progressActive = false; }
+                    printColor(line, CYAN);
+                }
+                else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
+                    if (progressActive) { cout << endl; progressActive = false; }
+                    printColor(line, line.find("ERROR") != string::npos ? RED : YELLOW);
+                }
+                line.clear();
+            }
+        }
+        else {
+            line += (char)c;
+        }
+    }
+    if (progressActive) cout << endl;
+
+    int r = _pclose(pipe);
+    remove(bat.c_str());
+    return r == 0;
+}
+
+string buildCommand(const string& url, const string& start, const string& end, bool isPlaylist) {
+    string cmd = "yt-dlp";
+
+    string cookiesPath = SCRIPT_DIR + COOKIES_FILE;
+    if (USE_COOKIES && fileExists(cookiesPath))
+        cmd += " --cookies \"" + cookiesPath + "\"";
+
+    string fmt = buildFormat();
+    cmd += " -f \"" + fmt + "\"";
+
+    string ext = "mp4";
+    string tag = "";
+
+    if (ONLY_VIDEO) {
+        if (VIDEO_FORMAT.find("WEBM") != string::npos) ext = "webm";
+        else ext = "mp4";
+        tag = " [only video]";
+        cmd += " --no-audio";
+    }
+    else if (ONLY_AUDIO) {
+        if (AUDIO_FORMAT.find("M4A") != string::npos) ext = "m4a";
+        else if (AUDIO_FORMAT.find("WEBM") != string::npos) ext = "webm";
+        else ext = "mp4";
+        tag = " [only audio]";
+    }
+    else {
+        ext = "mp4";
+        cmd += " --merge-output-format mp4";
+    }
+
+    if (isPlaylist) {
+        if (!start.empty()) cmd += " --playlist-start " + start;
+        if (!end.empty()) cmd += " --playlist-end " + end;
+    }
+
+    string out = isPlaylist ?
+        DOWNLOAD_PATH + "[Playlist] %%(playlist_title)s/%%(playlist_index)03d - [%%(channel)s] %%(title)s" + tag :
+        DOWNLOAD_PATH + "%%(title)s" + tag;
+
+    out += "." + ext;
+    cmd += " -o \"" + out + "\"";
+
+    string escapedUrl = url;
+    size_t pos = 0;
+    while ((pos = escapedUrl.find("\"", pos)) != string::npos) {
+        escapedUrl.replace(pos, 1, "\\\"");
+        pos += 2;
+    }
+    cmd += " \"" + escapedUrl + "\"";
+
+    return cmd;
+}
+
+void startDownload(const string& url = "", const string& start = "", const string& end = "", bool isPlaylist = false, bool retry = false) {
+    string u = url, s = start, e = end;
+    bool isPl = isPlaylist;
+
+    if (u.empty()) {
+        clearScreen();
+        printColor("============================================", CYAN);
+        printColor(retry ? " RETRY DOWNLOAD" : " START DOWNLOAD", CYAN);
+        printColor("============================================", CYAN);
+        cout << "\nEnter URL (ESC to cancel): \n> ";
+
+        cin.clear();
+        fflush(stdin);
+
+        if (!inputLineWithEscape(u, "")) {
+            printColor("\n[INFO] Cancelled", YELLOW);
+            waitForKey();
+            return;
+        }
+
+        if (u.empty()) {
+            cin.clear();
+            fflush(stdin);
+            if (!inputLineWithEscape(u, "> ")) {
+                printColor("\n[INFO] Cancelled", YELLOW);
+                waitForKey();
+                return;
+            }
+        }
+
+        if (u.empty()) {
+            printColor("[ERROR] URL empty!", RED);
+            waitForKey();
+            return;
+        }
+
+        isPl = u.find("playlist?list=") != string::npos;
+        if (isPl) {
+            string inp;
+            cout << "\nStart number (Enter=first, ESC to skip):\n> ";
+            if (!inputLineWithEscape(inp, "")) {
+                // ESC - пропускаем
+                cout << "[INFO] Skipped\n";
+            }
+            else if (!inp.empty()) {
+                s = inp;
+            }
+
+            cout << "\nEnd number (Enter=last, ESC to skip):\n> ";
+            if (!inputLineWithEscape(inp, "")) {
+                cout << "[INFO] Skipped\n";
+            }
+            else if (!inp.empty()) {
+                e = inp;
+            }
+        }
+    }
+
+    string cmd = buildCommand(u, s, e, isPl);
+    cout << "\n";
+    clearScreen();
+    printColor("============================================", CYAN);
+    printColor(retry ? " Retrying download..." : " Starting download...", CYAN);
+    printColor("============================================", CYAN);
+    cout << endl;
+
+    bool ok = execWithProgress(cmd);
+    if (!ok) {
+        RESUME_URL = u; RESUME_START = s; RESUME_END = e; RESUME_IS_PLAYLIST = isPl; RESUME_FAILED_INDEX = isPl ? (s.empty() ? 1 : stoi(s)) : -1;
+        printColor("\n============================================", RED);
+        printColor("[ERROR] Download failed!", RED);
+        printColor("============================================", RED);
+        printColor("\nPossible reasons:", YELLOW);
+        printColor("  - Expired/invalid cookies", YELLOW);
+        printColor("  - Network issues", YELLOW);
+        printColor("  - YouTube API changes", YELLOW);
+        printColor("  - Video unavailable", YELLOW);
+        cout << "\n1 - Update cookies\n0 - Main menu (ESC)\nYour choice: ";
+        char ch = getMenuChoice();
+        if (ch == 27) {
+            cout << "ESC" << endl;
+            return;
+        }
+        cout << ch << endl;
+        if (ch == '1' && cookieEditor(false) == "continue") {
+            clearScreen();
+            if (RESUME_IS_PLAYLIST && RESUME_FAILED_INDEX > 0)
+                startDownload(RESUME_URL, to_string(RESUME_FAILED_INDEX), RESUME_END, RESUME_IS_PLAYLIST, true);
+            else startDownload(RESUME_URL, "", "", RESUME_IS_PLAYLIST, true);
+        }
+    }
+    else {
+        printColor("\n============================================", GREEN);
+        printColor("[OK] Download completed!", GREEN);
+        printColor("============================================", GREEN);
+        waitForKey();
+    }
+}
+
+// ========== SETTINGS MENUS ==========
+void codecRecompilerMenu() {
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" If the video cannot be downloaded with the specified codec,", CYAN);
+    printColor(" ffmpeg will transcode it. This may take time and resources.", CYAN);
+    printColor("========================================", CYAN);
+    cout << "\nEnable codec recompiler?\n1) No\n2) Yes\n0) Exit\n\nYour choice: ";
+    char ch = getMenuChoice(); cout << ch << endl;
+    switch (ch) {
+    case '1': CODEC_RECOMPILER = false; saveConfig(); printColor("[OK] Disabled!", GREEN); waitForKey(); break;
+    case '2': CODEC_RECOMPILER = true; saveConfig(); printColor("[OK] Enabled!", GREEN); waitForKey(); break;
+    case '0': return;
+    default: printColor("[ERROR] Invalid!", RED); waitForKey();
+    }
+}
+
+void selectVideoQuality() {
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" Select video resolution", CYAN);
+    printColor("========================================", CYAN);
+    cout << "\n1) 2160p (4k)\n2) 1440p (2k)\n3) 1080p (FullHD)\n4) 720p (HD)\n5) 480p\n6) 360p\n\nYour choice: ";
+    char ch = getMenuChoice(); cout << ch << endl;
+    switch (ch) {
+    case '1': VIDEO_RESOLUTION = "2160"; break;
+    case '2': VIDEO_RESOLUTION = "1440"; break;
+    case '3': VIDEO_RESOLUTION = "1080"; break;
+    case '4': VIDEO_RESOLUTION = "720"; break;
+    case '5': VIDEO_RESOLUTION = "480"; break;
+    case '6': VIDEO_RESOLUTION = "360"; break;
+    default: printColor("[ERROR] Invalid!", RED); waitForKey(); return;
+    }
+
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" Select frame rate", CYAN);
+    printColor("========================================", CYAN);
+    cout << "\n1) 60fps\n2) 30fps\n\nYour choice: ";
+    ch = getMenuChoice(); cout << ch << endl;
+    switch (ch) {
+    case '1': VIDEO_FPS = "60"; break;
+    case '2': VIDEO_FPS = "30"; break;
+    default: printColor("[ERROR] Invalid!", RED); waitForKey(); return;
+    }
+
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" Select video format", CYAN);
+    printColor("========================================", CYAN);
+    cout << "\n1) MP4(H.264)\n2) MP4(AV1)\n3) WEBM(AV1)\n4) WEBM(VP9)\n\nYour choice: ";
+    ch = getMenuChoice(); cout << ch << endl;
+    switch (ch) {
+    case '1': VIDEO_FORMAT = "MP4(H.264)"; break;
+    case '2': VIDEO_FORMAT = "MP4(AV1)"; break;
+    case '3': VIDEO_FORMAT = "WEBM(AV1)"; break;
+    case '4': VIDEO_FORMAT = "WEBM(VP9)"; break;
+    default: printColor("[ERROR] Invalid!", RED); waitForKey(); return;
+    }
+    saveConfig();
+    printColor("[OK] Updated!", GREEN);
+    waitForKey();
+}
+
+void selectAudioQuality() {
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" Select audio format", CYAN);
+    printColor("========================================", CYAN);
+    cout << "\n1) M4A(AAC)\n2) WEBM(Opus)\n3) WEBM(Vorbis)\n\nYour choice: ";
+    char ch = getMenuChoice(); cout << ch << endl;
+    switch (ch) { case '1': AUDIO_FORMAT = "M4A(AAC)"; break; case '2': AUDIO_FORMAT = "WEBM(Opus)"; break; case '3': AUDIO_FORMAT = "WEBM(Vorbis)"; break; default: printColor("[ERROR] Invalid!", RED); waitForKey(); return; }
+                          saveConfig(); printColor("[OK] Updated!", GREEN); waitForKey();
+}
+
+void toggleOnlyAudio() { ONLY_AUDIO = !ONLY_AUDIO; if (ONLY_AUDIO) ONLY_VIDEO = false; saveConfig(); }
+void toggleOnlyVideo() { ONLY_VIDEO = !ONLY_VIDEO; if (ONLY_VIDEO) ONLY_AUDIO = false; saveConfig(); }
+
+// ========== SETTINGS ==========
+void settingsMenu() {
+    while (true) {
+        clearScreen();
+        printColor("========================================", CYAN);
+        printColor(" SETTINGS", CYAN);
+        printColor("========================================", CYAN);
+        cout << "\n1. Download location: [" << DOWNLOAD_PATH << "]"
+            << "\n2. Video quality: [" << VIDEO_RESOLUTION << "p " << VIDEO_FPS << "fps " << VIDEO_FORMAT << "]"
+            << "\n3. Audio quality: [" << AUDIO_FORMAT << "]"
+            << "\n4. Codec recompiler: [" << (CODEC_RECOMPILER ? "ON" : "OFF") << "]"
+            << "\n5. Only audio: [" << (ONLY_AUDIO ? "ON" : "OFF") << "]"
+            << "\n6. Only video: [" << (ONLY_VIDEO ? "ON" : "OFF") << "]"
+            << "\n7. Update cookies"
+            << "\n0. Return (ESC)\n\nYour choice: ";
+        char ch = getMenuChoice();
+        if (ch == 27) {
+            cout << "ESC" << endl;
+            return;
+        }
+        cout << ch << endl;
+        switch (ch) {
+        case '1': { string p = openFolderDialog(); if (!p.empty()) { DOWNLOAD_PATH = p; saveConfig(); printColor("[OK] Updated!", GREEN); } else printColor("[INFO] Not changed", YELLOW); waitForKey(); break; }
+        case '2': selectVideoQuality(); break;
+        case '3': selectAudioQuality(); break;
+        case '4': codecRecompilerMenu(); break;
+        case '5': toggleOnlyAudio(); break;
+        case '6': toggleOnlyVideo(); break;
+        case '7': cookieEditor(true); saveConfig(); break;
+        case '0': return;
+        default: printColor("[ERROR] Invalid!", RED); waitForKey();
+        }
+    }
+}
+
+// ========== CHECKS ==========
+bool checkYTDLP() {
+    if (fileExists(SCRIPT_DIR + "yt-dlp.exe")) { YTDLP_PATH = SCRIPT_DIR + "yt-dlp.exe"; YTDLP_FOUND = true; return true; }
+    if (inPath("yt-dlp.exe", YTDLP_PATH)) { YTDLP_FOUND = true; return true; }
+    if (fileExists("C:\\Program Files\\YtDLP\\yt-dlp.exe")) { YTDLP_PATH = "C:\\Program Files\\YtDLP\\yt-dlp.exe"; YTDLP_FOUND = true; return true; }
+
+    string dir = SCRIPT_DIR;
+    string cmd = "powershell -Command \"& {$url='https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';$out='" + dir + "yt-dlp.exe';try{Invoke-WebRequest -Uri $url -OutFile $out -UserAgent 'Mozilla/5.0'}catch{exit 1}}\"";
+    if (system(cmd.c_str()) != 0) { YTDLP_FOUND = false; return false; }
+    YTDLP_PATH = dir + "yt-dlp.exe"; YTDLP_FOUND = true; return true;
+}
+
+bool checkFFMPEG() {
+    if (fileExists(SCRIPT_DIR + "ffmpeg.exe")) { FFMPEG_PATH = SCRIPT_DIR + "ffmpeg.exe"; FFMPEG_FOUND = true; return true; }
+    if (inPath("ffmpeg.exe", FFMPEG_PATH)) { FFMPEG_FOUND = true; return true; }
+
+    cout << "\n[WARNING] FFMPEG not found! Install? (y/n): ";
+    if (getMenuChoice() != 'y') { FFMPEG_FOUND = false; cout << "[WARNING] Skipped\n"; return false; }
+
+    string dir = SCRIPT_DIR;
+    string cmd = "powershell -Command \"& {$url='https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';$zip='" + dir + "ffmpeg.zip';try{Invoke-WebRequest -Uri $url -OutFile $zip -UserAgent 'Mozilla/5.0';Add-Type -AssemblyName System.IO.Compression.FileSystem;[System.IO.Compression.ZipFile]::ExtractToDirectory($zip,'" + dir + "');Remove-Item $zip;Write-Host 'OK'}catch{exit 1}}\"";
+    if (system(cmd.c_str()) != 0) { FFMPEG_FOUND = false; return false; }
+    string p = findFileRecursive(dir, "ffmpeg.exe");
+    if (!p.empty()) { FFMPEG_PATH = p; FFMPEG_FOUND = true; cout << "[OK] Installed!\n"; return true; }
+    FFMPEG_FOUND = false; return false;
+}
+
+// ========== MAIN ==========
+void displayMenu() {
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.01", CYAN);
+    printColor("========================================", CYAN);
+    printColor("========================================", GREEN);
+    printColor(" YT-DLP: " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), GREEN);
+    printColor(" FFMPEG: " + string(FFMPEG_FOUND ? "[OK] installed" : "[WARNING] not installed"), GREEN);
+    printColor("========================================", GREEN);
+    cout << "========================================\n1. Start download\n2. Settings\n0. Exit\n========================================\n\nYour number choice: ";
+}
+
+int main() {
+    setUTF8();
+    SCRIPT_DIR = getScriptDir();
+
+    loadConfig();
+
+    if (!checkYTDLP()) {
+        cout << "\n[ERROR] YT-DLP installation failed!\n"; waitForKey(); return 1;
+    }
+    checkFFMPEG();
+
+    while (true) {
+        displayMenu();
+        char ch = getMenuChoice(); cout << ch << "\n\n";
+        switch (ch) {
+        case '1': startDownload(); break;
+        case '2': settingsMenu(); break;
+        case '0': cout << "Exiting...\n"; return 0;
+        default: printColor("[ERROR] Invalid!", RED); waitForKey();
+        }
+    }
+    return 0;
+}
