@@ -17,17 +17,39 @@
 using namespace std;
 
 // ========== CONFIG ==========
+enum ErrorType {
+    NOT_ERROR = 0,
+    COOKIE_ERROR = 1,
+    AGE_ERROR = 2,
+    LIVE_ERROR = 3,
+    MERGE_ERROR = 4,
+    VIDEO_ERROR = 5
+};
+
 string YTDLP_PATH, FFMPEG_PATH, SCRIPT_DIR, DOWNLOAD_PATH;
 string COOKIES_FILE = "cookies.txt";
 string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
 string AUDIO_FORMAT = "M4A(AAC)";
 bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false;
 bool YTDLP_FOUND = false, FFMPEG_FOUND = false;
+int LAST_ERROR = NOT_ERROR;
 
 // Resume
 string RESUME_URL, RESUME_START, RESUME_END;
 bool RESUME_IS_PLAYLIST = false;
 int RESUME_FAILED_INDEX = -1;
+
+// Механизм очистки предыдущих строк
+void clearLastLines(int count) {
+    cout << "\033[" << count << "A"; // Подняться на count строк вверх
+    for (int i = 0; i < count; i++) {
+        cout << "\033[K"; // Очистить строку
+        if (i < count - 1) {
+            cout << "\033[E"; // Спуститься на одну строку вниз
+        }
+    }
+    cout << "\033[" << count - 1 << "A"; // Вернуться наверх
+}
 
 // ========== UTF-8 HELPERS ==========
 string wstringToUtf8(const wstring& wstr) {
@@ -84,7 +106,6 @@ bool inputWithEscape(string& result, const string& prompt) {
     }
 }
 
-// Альтернативный вариант с getline и проверкой на ESC
 bool inputLineWithEscape(string& result, const string& prompt) {
     cout << prompt;
     result.clear();
@@ -119,10 +140,18 @@ void setUTF8() {
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
     setlocale(LC_ALL, ".UTF8");
+    // Включаем поддержку UTF-8 в консоли
+    SetConsoleOutputCP(65001);
+    // Для Windows 10+ включаем виртуальный терминал
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    GetConsoleMode(hOut, &dwMode);
+    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    SetConsoleMode(hOut, dwMode);
 }
 
 void clearScreen() { system("cls"); }
-void waitForKey() { cout << "\nPress any key..."; (void)_getch(); while (_kbhit()) (void)_getch(); }
+void waitForKey() { cout << "\nPress any key..."; (void)_getch(); while (_kbhit()) (void)_getch();  cout << "\n"; }
 
 char getMenuChoice() {
     while (_kbhit()) {
@@ -270,7 +299,6 @@ void loadConfig() {
         if (f.is_open()) {
             string l;
             while (getline(f, l)) {
-                // Удаляем BOM из первой строки если есть
                 if (l.length() >= 3 && (unsigned char)l[0] == 0xEF &&
                     (unsigned char)l[1] == 0xBB && (unsigned char)l[2] == 0xBF) {
                     l = l.substr(3);
@@ -291,7 +319,6 @@ void loadConfig() {
         }
     }
 
-    // Если DOWNLOAD_PATH не задан - создаем папку в Documents
     if (DOWNLOAD_PATH.empty()) {
         wchar_t buf[MAX_PATH];
         if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, buf))) {
@@ -386,16 +413,14 @@ bool saveCookies(const string& c) {
 // ========== MENUS ==========
 string cookieEditor(bool fromSettings = false) {
     while (true) {
-        clearScreen();
         printColor("========================================", CYAN);
         printColor(" COOKIE EDITOR", CYAN);
         printColor("========================================", CYAN);
-        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n0. "
-            << (fromSettings ? "Return" : "Continue") << "\n\nYour choice: ";
+        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n0. Exit to main menu\n\nYour choice: ";
         char ch = getMenuChoice();
         if (ch == 27) {
             cout << "ESC" << endl;
-            return fromSettings ? "settings" : "continue";
+            return "exit";
         }
         cout << ch << endl;
         switch (ch) {
@@ -403,21 +428,25 @@ string cookieEditor(bool fromSettings = false) {
             string p = openFileDialog();
             if (!p.empty() && validateCookies(p)) {
                 ifstream f(p); string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>()); f.close();
-                if (saveCookies(c)) { USE_COOKIES = true; saveConfig(); printColor("[OK] Cookies saved!", GREEN); waitForKey(); return fromSettings ? "settings" : "continue"; }
+                if (saveCookies(c)) { USE_COOKIES = true; saveConfig(); clearLastLines(10); return fromSettings ? "settings" : "continue"; }
+
             }
             else printColor("[ERROR] Invalid cookies file!", RED);
-            waitForKey(); break;
+            waitForKey(); clearLastLines(12); break;
         }
         case '2': {
             string c = getClipboard();
             if (c.empty()) { printColor("[ERROR] Clipboard empty!", RED); waitForKey(); break; }
             if (validateCookiesContent(c) && saveCookies(c)) {
-                USE_COOKIES = true; saveConfig(); printColor("[OK] Cookies saved!", GREEN); waitForKey();
+                USE_COOKIES = true; saveConfig(); clearLastLines(10);
                 return fromSettings ? "settings" : "continue";
             }
-            printColor("[ERROR] Invalid cookies!", RED); waitForKey(); break;
+            printColor("[ERROR] Invalid cookies!", RED); waitForKey(); clearLastLines(12); break;
         }
-        case '0': return fromSettings ? "settings" : "continue";
+        case '0': {
+            cout << "Exit" << endl;
+            return "exit";
+        }
         default: printColor("[ERROR] Invalid choice!", RED); waitForKey();
         }
     }
@@ -478,6 +507,10 @@ bool execWithProgress(const string& cmd) {
     bool progressActive = false;
     int curItem = 0, totalItems = 0;
     int c;
+    bool mergeFailed = false;
+    string mergeErrorPath = "";
+    string videoFile = "";
+    string audioFile = "";
 
     while ((c = fgetc(pipe)) != EOF) {
         if (c == '\r' || c == '\n') {
@@ -490,6 +523,7 @@ bool execWithProgress(const string& cmd) {
                 else if (line.find("[download] Destination:") == 0) {
                     string path = line.substr(string("[download] Destination:").length());
                     while (!path.empty() && path.front() == ' ') path.erase(path.begin());
+
                     size_t slash = path.find_last_of("\\/");
                     string name = (slash != string::npos) ? path.substr(slash + 1) : path;
                     size_t dot = name.find_last_of('.');
@@ -518,7 +552,7 @@ bool execWithProgress(const string& cmd) {
                     string path = line.substr(string("[Merger] Merging formats into").length());
                     while (!path.empty() && path.front() == ' ') path.erase(path.begin());
                     if (!path.empty() && path.back() == '"') path.pop_back();
-                    printColor("[Merger] Merging formats into \"" + path + "\"", CYAN);
+                    printColor("[Merger] Merging full video into \"" + path + "\"", CYAN);
                     cout << endl;
                 }
                 else if (parseDownloadLine(line, percent, speed, eta)) {
@@ -527,12 +561,68 @@ bool execWithProgress(const string& cmd) {
                 }
                 else if (line.find("[Merger]") == 0 || line.find("[ExtractAudio]") == 0 ||
                     line.find("[VideoConvertor]") == 0 || line.find("[Fixup") == 0) {
-                    if (progressActive) { cout << endl << endl; progressActive = false; }
-                    printColor(line, CYAN);
+                    if (progressActive) { cout << endl; progressActive = false; }
+                    if (line.find("[FixupM4a]") == string::npos) {
+                        printColor(line, CYAN);
+                    }
+                }
+                else if (line.find("WARNING") != string::npos &&
+                    line.find("No title found in player responses") != string::npos) {
+                    // Игнорируем
                 }
                 else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
                     if (progressActive) { cout << endl; progressActive = false; }
-                    printColor(line, line.find("ERROR") != string::npos ? RED : YELLOW);
+
+                    if (line.find("Sign in to confirm you're not a bot") != string::npos ||
+                        line.find("Login required") != string::npos ||
+                        line.find("cookies") != string::npos ||
+                        line.find("Cookie") != string::npos ||
+                        line.find("invalid cookies") != string::npos ||
+                        line.find("oauth") != string::npos ||
+                        line.find("no longer valid") != string::npos) {
+                        LAST_ERROR = COOKIE_ERROR;
+                        _pclose(pipe);
+                        remove(bat.c_str());
+                        return false;
+                    }
+                    else if (line.find("Sign in to confirm your age") != string::npos) {
+                        LAST_ERROR = AGE_ERROR;
+                        printColor("\n[AGE ERROR] " + line, YELLOW);
+                        printColor("[AGE ERROR] This video has age restriction.", YELLOW);
+                        printColor("[AGE ERROR] Please use account cookies that can access this video.", YELLOW);
+                        _pclose(pipe);
+                        remove(bat.c_str());
+                        return false;
+                    }
+                    else if (line.find("This live event will begin in a few moments") != string::npos) {
+                        if (LAST_ERROR != COOKIE_ERROR && LAST_ERROR != AGE_ERROR) {
+                            LAST_ERROR = LIVE_ERROR;
+                            printColor("\n[LIVE] This video is a live stream that hasn't started yet.", YELLOW);
+                            printColor("[LIVE] Please check the stream yourself:", YELLOW);
+                            printColor("[LIVE] 1. Wait until the stream ends and try again", YELLOW);
+                            printColor("[LIVE] 2. If the stream is ongoing, try again later", YELLOW);
+                            printColor("[LIVE] 3. The recording may not be available yet", YELLOW);
+                            printColor("[LIVE] The video cannot be downloaded at this moment.", YELLOW);
+                        }
+                    }
+                    else {
+                        if (LAST_ERROR == NOT_ERROR) {
+                            LAST_ERROR = VIDEO_ERROR;
+                        }
+                        printColor(line, line.find("ERROR") != string::npos ? RED : YELLOW);
+                    }
+
+                    if (line.find("ERROR") != string::npos &&
+                        (line.find("merge") != string::npos || line.find("Merger") != string::npos)) {
+                        mergeFailed = true;
+                        size_t quote1 = line.find('"');
+                        if (quote1 != string::npos) {
+                            size_t quote2 = line.find('"', quote1 + 1);
+                            if (quote2 != string::npos) {
+                                mergeErrorPath = line.substr(quote1 + 1, quote2 - quote1 - 1);
+                            }
+                        }
+                    }
                 }
                 line.clear();
             }
@@ -545,6 +635,84 @@ bool execWithProgress(const string& cmd) {
 
     int r = _pclose(pipe);
     remove(bat.c_str());
+
+    // Если склейка не удалась - пробуем склеить заново через ffmpeg с повторными попытками
+    if (mergeFailed && !mergeErrorPath.empty()) {
+        printColor("\n[INFO] Merge failed. Trying to merge manually...", YELLOW);
+
+        string dir = mergeErrorPath.substr(0, mergeErrorPath.find_last_of("\\/") + 1);
+        string baseName = mergeErrorPath.substr(mergeErrorPath.find_last_of("\\/") + 1);
+        size_t dot = baseName.find_last_of('.');
+        if (dot != string::npos) baseName = baseName.substr(0, dot);
+
+        WIN32_FIND_DATAW fd;
+        wstring wdir = utf8ToWstring(dir);
+        HANDLE hFind = FindFirstFileW((wdir + L"*.*").c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            do {
+                if (wstring(fd.cFileName) == L"." || wstring(fd.cFileName) == L"..") continue;
+                string fileName = wstringToUtf8(fd.cFileName);
+                if (fileName.find(baseName) != string::npos) {
+                    if (fileName.find(".mp4") != string::npos && fileName.find(".m4a") == string::npos) {
+                        videoFile = dir + fileName;
+                    }
+                    else if (fileName.find(".m4a") != string::npos || fileName.find(".webm") != string::npos) {
+                        audioFile = dir + fileName;
+                    }
+                }
+            } while (FindNextFileW(hFind, &fd) != 0);
+            FindClose(hFind);
+        }
+
+        if (!videoFile.empty() && !audioFile.empty()) {
+            int maxRetries = 3;
+            bool mergeSuccess = false;
+
+            for (int attempt = 1; attempt <= maxRetries; attempt++) {
+                string outputFile = dir + baseName + "_merged.mp4";
+                string mergeCmd = "\"" + FFMPEG_PATH + "\" -i \"" + videoFile + "\" -i \"" + audioFile + "\" -c:v copy -c:a aac \"" + outputFile + "\"";
+
+                printColor("[INFO] Merge attempt " + to_string(attempt) + " of " + to_string(maxRetries), YELLOW);
+                printColor("[INFO] Running: " + mergeCmd, CYAN);
+                int mergeResult = system(mergeCmd.c_str());
+
+                if (mergeResult == 0) {
+                    printColor("[OK] Manual merge successful on attempt " + to_string(attempt) + "!", GREEN);
+                    remove(videoFile.c_str());
+                    remove(audioFile.c_str());
+                    string finalFile = dir + baseName + ".mp4";
+                    if (rename(outputFile.c_str(), finalFile.c_str()) != 0) {
+                        printColor("[WARNING] Could not rename merged file, but it exists as: " + outputFile, YELLOW);
+                    }
+                    else {
+                        printColor("[OK] Final file: " + finalFile, GREEN);
+                    }
+                    mergeSuccess = true;
+                    break;
+                }
+                else {
+                    printColor("[ERROR] Merge attempt " + to_string(attempt) + " failed!", RED);
+                    if (attempt < maxRetries) {
+                        printColor("[INFO] Waiting 2 seconds before retry...", YELLOW);
+                        Sleep(2000);
+                    }
+                }
+            }
+
+            if (!mergeSuccess) {
+                LAST_ERROR = MERGE_ERROR;
+                printColor("[ERROR] All " + to_string(maxRetries) + " merge attempts failed!", RED);
+                return false;
+            }
+            return true;
+        }
+        else {
+            printColor("[ERROR] Could not find video/audio files for manual merge.", RED);
+            LAST_ERROR = MERGE_ERROR;
+            return false;
+        }
+    }
+
     return r == 0;
 }
 
@@ -583,6 +751,9 @@ string buildCommand(const string& url, const string& start, const string& end, b
         if (!end.empty()) cmd += " --playlist-end " + end;
     }
 
+    // Принудительно устанавливаем UTF-8 для вывода
+    cmd += " --encoding utf-8";
+
     string out = isPlaylist ?
         DOWNLOAD_PATH + "[Playlist] %%(playlist_title)s/%%(playlist_index)03d - [%%(channel)s] %%(title)s" + tag :
         DOWNLOAD_PATH + "%%(title)s" + tag;
@@ -604,9 +775,15 @@ string buildCommand(const string& url, const string& start, const string& end, b
 void startDownload(const string& url = "", const string& start = "", const string& end = "", bool isPlaylist = false, bool retry = false) {
     string u = url, s = start, e = end;
     bool isPl = isPlaylist;
+    static bool cookieErrorHandled = false; // Флаг для предотвращения повторного показа меню
 
     if (u.empty()) {
-        clearScreen();
+        if (!retry) {
+            clearScreen();
+        }
+        else {
+            cout << "\n";
+        }
         printColor("============================================", CYAN);
         printColor(retry ? " RETRY DOWNLOAD" : " START DOWNLOAD", CYAN);
         printColor("============================================", CYAN);
@@ -637,19 +814,26 @@ void startDownload(const string& url = "", const string& start = "", const strin
             return;
         }
 
-        isPl = u.find("playlist?list=") != string::npos;
+        if (u.find("&list=") != string::npos && u.find("/playlist?list=") == string::npos) {
+            size_t pos = u.find("&list=");
+            if (pos != string::npos) {
+                u = u.substr(0, pos);
+            }
+        }
+
+        isPl = u.find("/playlist?list=") != string::npos;
+
         if (isPl) {
             string inp;
-            cout << "\nStart number (Enter=first, ESC to skip):\n> ";
+            cout << "\nStart number video in playlist (Enter=first, ESC to skip):\nYour choice: ";
             if (!inputLineWithEscape(inp, "")) {
-                // ESC - пропускаем
                 cout << "[INFO] Skipped\n";
             }
             else if (!inp.empty()) {
                 s = inp;
             }
 
-            cout << "\nEnd number (Enter=last, ESC to skip):\n> ";
+            cout << "\nEnd number video in playlist (Enter=last, ESC to skip):\nYour choice: ";
             if (!inputLineWithEscape(inp, "")) {
                 cout << "[INFO] Skipped\n";
             }
@@ -657,43 +841,186 @@ void startDownload(const string& url = "", const string& start = "", const strin
                 e = inp;
             }
         }
+
+        cookieErrorHandled = false; // Сбрасываем флаг при новом URL
     }
 
+    // Если ошибка куки уже была обработана - выходим
+    if (cookieErrorHandled) {
+        return;
+    }
+
+    LAST_ERROR = NOT_ERROR;
+
     string cmd = buildCommand(u, s, e, isPl);
-    cout << "\n";
-    clearScreen();
+
+    if (!retry) {
+        clearScreen();
+    }
+
     printColor("============================================", CYAN);
-    printColor(retry ? " Retrying download..." : " Starting download...", CYAN);
+    printColor(retry ? " RETRYING DOWNLOAD..." : " STARTING DOWNLOAD...", CYAN);
     printColor("============================================", CYAN);
     cout << endl;
 
     bool ok = execWithProgress(cmd);
-    if (!ok) {
-        RESUME_URL = u; RESUME_START = s; RESUME_END = e; RESUME_IS_PLAYLIST = isPl; RESUME_FAILED_INDEX = isPl ? (s.empty() ? 1 : stoi(s)) : -1;
-        printColor("\n============================================", RED);
-        printColor("[ERROR] Download failed!", RED);
+
+    // Если ошибка куки - показываем меню (для любого видео, не только плейлиста)
+    if (LAST_ERROR == COOKIE_ERROR || LAST_ERROR == AGE_ERROR) {
+        cookieErrorHandled = true; // Помечаем, что обработали
+
+        // Определяем текущий индекс для продолжения
+        int currentIndex = 1;
+        if (!s.empty()) {
+            currentIndex = stoi(s);
+        }
+
         printColor("============================================", RED);
-        printColor("\nPossible reasons:", YELLOW);
-        printColor("  - Expired/invalid cookies", YELLOW);
-        printColor("  - Network issues", YELLOW);
-        printColor("  - YouTube API changes", YELLOW);
-        printColor("  - Video unavailable", YELLOW);
+        if (LAST_ERROR == COOKIE_ERROR) {
+            printColor("[ERROR] Cookies are invalid or expired!", RED);
+            printColor("[ERROR] Sign in to confirm you're not a bot.", RED);
+        }
+        else {
+            printColor("[ERROR] This video has age restriction!", YELLOW);
+            printColor("[ERROR] Please use account cookies that can access this video.", YELLOW);
+        }
+        printColor("============================================", RED);
+
+        printColor("\n============================================", YELLOW);
+        printColor("[INFO] Please update your cookies to continue.", YELLOW);
+        printColor("============================================", YELLOW);
         cout << "\n1 - Update cookies\n0 - Main menu (ESC)\nYour choice: ";
         char ch = getMenuChoice();
         if (ch == 27) {
             cout << "ESC" << endl;
+            LAST_ERROR = NOT_ERROR;
+            cookieErrorHandled = false;
             return;
         }
         cout << ch << endl;
-        if (ch == '1' && cookieEditor(false) == "continue") {
-            clearScreen();
-            if (RESUME_IS_PLAYLIST && RESUME_FAILED_INDEX > 0)
-                startDownload(RESUME_URL, to_string(RESUME_FAILED_INDEX), RESUME_END, RESUME_IS_PLAYLIST, true);
-            else startDownload(RESUME_URL, "", "", RESUME_IS_PLAYLIST, true);
+        if (ch == '1') {
+            clearLastLines(3);
+            string result = cookieEditor(false);
+            if (result == "continue") {
+                cookieErrorHandled = false; // Сбрасываем флаг после обновления
+                cout << "\n";
+                LAST_ERROR = NOT_ERROR;
+                // Продолжаем с текущего видео
+                if (isPl) {
+                    startDownload(u, to_string(currentIndex), e, true, true);
+                }
+                else {
+                    startDownload(u, s, e, isPl, true);
+                }
+                return;
+            }
+        }
+        LAST_ERROR = NOT_ERROR;
+        cookieErrorHandled = false;
+        return;
+    }
+
+    if (LAST_ERROR == LIVE_ERROR) {
+        if (isPl) {
+            int currentIndex = s.empty() ? 1 : stoi(s);
+            int nextIndex = currentIndex + 1;
+            string nextStart = to_string(nextIndex);
+
+            if (!e.empty() && nextIndex > stoi(e)) {
+                printColor("\n[INFO] Reached end of playlist range.", YELLOW);
+                printColor("[OK] Download partially completed!", GREEN);
+                waitForKey();
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                return;
+            }
+
+            printColor("\n============================================", YELLOW);
+            printColor("[ERROR] Video " + to_string(currentIndex) + " was skipped!", YELLOW);
+            printColor("[ERROR] This is a live stream that hasn't started yet.", YELLOW);
+            printColor("============================================", YELLOW);
+            printColor("\n[INFO] Continuing with next video...", GREEN);
+            cout << "\nContinuing in 2 seconds...\n";
+            Sleep(2000);
+
+            LAST_ERROR = NOT_ERROR;
+            startDownload(u, nextStart, e, true, true);
+            return;
+        }
+        else {
+            printColor("\n============================================", RED);
+            printColor("[ERROR] This is a live stream that hasn't started yet.", RED);
+            printColor("============================================", RED);
+            waitForKey();
+            LAST_ERROR = NOT_ERROR;
+            cookieErrorHandled = false;
+            return;
+        }
+    }
+
+    if (!ok) {
+        if (isPl) {
+            int currentIndex = s.empty() ? 1 : stoi(s);
+            int nextIndex = currentIndex + 1;
+            string nextStart = to_string(nextIndex);
+
+            if (!e.empty() && nextIndex > stoi(e)) {
+                printColor("\n[INFO] Reached end of playlist range.", YELLOW);
+                printColor("[OK] Download partially completed!", GREEN);
+                waitForKey();
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                return;
+            }
+
+            printColor("\n============================================", YELLOW);
+            printColor("[ERROR] Video " + to_string(currentIndex) + " was skipped!", YELLOW);
+            printColor("[ERROR] Possible reasons:", YELLOW);
+            printColor("  - Video is unavailable or deleted", YELLOW);
+            printColor("  - Video is private", YELLOW);
+            printColor("  - Network connection issues", YELLOW);
+            printColor("  - YouTube API changes", YELLOW);
+            printColor("============================================", YELLOW);
+            printColor("\n[INFO] Continuing with next video...", GREEN);
+            cout << "\nContinuing in 2 seconds...\n";
+            Sleep(2000);
+            LAST_ERROR = NOT_ERROR;
+            startDownload(u, nextStart, e, true, true);
+            return;
+        }
+        else {
+            printColor("\n============================================", RED);
+            printColor("[ERROR] Download failed!", RED);
+            printColor("============================================", RED);
+            printColor("\nPossible reasons:", YELLOW);
+            printColor("  - Expired/invalid cookies", YELLOW);
+            printColor("  - Network issues", YELLOW);
+            printColor("  - YouTube API changes", YELLOW);
+            printColor("  - Video unavailable", YELLOW);
+            cout << "\n1 - Update cookies\n0 - Main menu (ESC)\nYour choice: ";
+            char ch = getMenuChoice();
+            if (ch == 27) {
+                cout << "ESC" << endl;
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                return;
+            }
+            cout << ch << endl;
+            if (ch == '1' && cookieEditor(false) == "continue") {
+                cout << "\n";
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                startDownload(u, s, e, isPl, true);
+                return;
+            }
+            LAST_ERROR = NOT_ERROR;
+            cookieErrorHandled = false;
         }
     }
     else {
-        printColor("\n============================================", GREEN);
+        LAST_ERROR = NOT_ERROR;
+        cookieErrorHandled = false;
+        printColor("============================================", GREEN);
         printColor("[OK] Download completed!", GREEN);
         printColor("============================================", GREEN);
         waitForKey();
@@ -704,17 +1031,11 @@ void startDownload(const string& url = "", const string& start = "", const strin
 void codecRecompilerMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" If the video cannot be downloaded with the specified codec,", CYAN);
-    printColor(" ffmpeg will transcode it. This may take time and resources.", CYAN);
+    printColor(" Coming soon...", CYAN);
     printColor("========================================", CYAN);
-    cout << "\nEnable codec recompiler?\n1) No\n2) Yes\n0) Exit\n\nYour choice: ";
-    char ch = getMenuChoice(); cout << ch << endl;
-    switch (ch) {
-    case '1': CODEC_RECOMPILER = false; saveConfig(); printColor("[OK] Disabled!", GREEN); waitForKey(); break;
-    case '2': CODEC_RECOMPILER = true; saveConfig(); printColor("[OK] Enabled!", GREEN); waitForKey(); break;
-    case '0': return;
-    default: printColor("[ERROR] Invalid!", RED); waitForKey();
-    }
+    cout << "\nThis feature is under development.\n";
+    cout << "It will allow you to re-encode videos to different codecs.\n";
+    waitForKey();
 }
 
 void selectVideoQuality() {
@@ -806,7 +1127,7 @@ void settingsMenu() {
         case '4': codecRecompilerMenu(); break;
         case '5': toggleOnlyAudio(); break;
         case '6': toggleOnlyVideo(); break;
-        case '7': cookieEditor(true); saveConfig(); break;
+        case '7': clearScreen(); cookieEditor(true); saveConfig(); break;
         case '0': return;
         default: printColor("[ERROR] Invalid!", RED); waitForKey();
         }
