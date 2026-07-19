@@ -27,12 +27,12 @@ enum ErrorType {
     RATE_LIMIT_ERROR = 6
 };
 
-string YTDLP_PATH, FFMPEG_PATH, SCRIPT_DIR, DOWNLOAD_PATH;
+string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH;
 string COOKIES_FILE = "cookies.txt";
 string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
 string AUDIO_FORMAT = "M4A(AAC)";
 bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false;
-bool YTDLP_FOUND = false, FFMPEG_FOUND = false;
+bool YTDLP_FOUND = false, FFMPEG_FOUND = false, QJS_FOUND = false;
 int LAST_ERROR = NOT_ERROR;
 string ARCHIVE_PATH = "";
 int TOTAL_ITEMS_IN_PLAYLIST = 0;
@@ -47,14 +47,14 @@ int RESUME_FAILED_INDEX = -1;
 
 // Механизм очистки предыдущих строк
 void clearLastLines(int count) {
-    cout << "\033[" << count << "A"; // Подняться на count строк вверх
+    cout << "\033[" << count << "A";
     for (int i = 0; i < count; i++) {
-        cout << "\033[K"; // Очистить строку
+        cout << "\033[K";
         if (i < count - 1) {
-            cout << "\033[E"; // Спуститься на одну строку вниз
+            cout << "\033[E";
         }
     }
-    cout << "\033[" << count - 1 << "A"; // Вернуться наверх
+    cout << "\033[" << count - 1 << "A";
 }
 
 // ========== UTF-8 HELPERS ==========
@@ -90,22 +90,22 @@ bool inputWithEscape(string& result, const string& prompt) {
     char ch;
     while (true) {
         ch = _getch();
-        if (ch == 27) { // ESC
+        if (ch == 27) {
             result.clear();
             return false;
         }
-        if (ch == '\r') { // Enter
+        if (ch == '\r') {
             cout << endl;
             return true;
         }
-        if (ch == '\b' || ch == 127) { // Backspace
+        if (ch == '\b' || ch == 127) {
             if (!result.empty()) {
                 result.pop_back();
                 cout << "\b \b";
             }
             continue;
         }
-        if (ch >= 32 && ch <= 126) { // Printable chars
+        if (ch >= 32 && ch <= 126) {
             result += ch;
             cout << ch;
         }
@@ -119,23 +119,23 @@ bool inputLineWithEscape(string& result, const string& prompt) {
     char ch;
     while (true) {
         ch = _getch();
-        if (ch == 27) { // ESC
+        if (ch == 27) {
             result.clear();
             cout << endl;
             return false;
         }
-        if (ch == '\r') { // Enter
+        if (ch == '\r') {
             cout << endl;
             return true;
         }
-        if (ch == '\b' || ch == 127) { // Backspace
+        if (ch == '\b' || ch == 127) {
             if (!result.empty()) {
                 result.pop_back();
                 cout << "\b \b";
             }
             continue;
         }
-        if (ch >= 32 && ch <= 126) { // Printable chars
+        if (ch >= 32 && ch <= 126) {
             result += ch;
             cout << ch;
         }
@@ -209,8 +209,8 @@ string getEnv(const string& n) {
 
 bool inPath(const string& f, string& full) {
     wstring wf = utf8ToWstring(f);
-    wstring pathStr = utf8ToWstring(getEnv("PATH"));
-    wstringstream ss(pathStr);
+    string pathStr = getEnv("PATH");
+    wstringstream ss(utf8ToWstring(pathStr));
     wstring p;
     while (getline(ss, p, L';')) {
         wstring testPath = p + L"\\" + wf;
@@ -221,6 +221,21 @@ bool inPath(const string& f, string& full) {
         }
     }
     return false;
+}
+
+// Добавление папки в PATH
+// Добавление папки в PATH (постоянно для пользователя)
+void addToPath(const string& dir) {
+    // 1. Добавляем в PATH текущего процесса
+    string currentPath = getEnv("PATH");
+    if (currentPath.find(dir) == string::npos) {
+        string newPath = dir + ";" + currentPath;
+        SetEnvironmentVariableA("PATH", newPath.c_str());
+    }
+
+    // 2. Добавляем в системный PATH пользователя (постоянно)
+    string psCmd = "powershell -Command \"$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($currentPath -notlike '*" + dir + "*') { [Environment]::SetEnvironmentVariable('PATH', $currentPath + ';" + dir + "', 'User') }\"";
+    system(psCmd.c_str());
 }
 
 bool parseDownloadLine(const string& line, string& percent, string& speed, string& eta) {
@@ -341,7 +356,6 @@ void cleanupOldArchives() {
                 nowTime.LowPart = nowFt.dwLowDateTime;
                 nowTime.HighPart = nowFt.dwHighDateTime;
 
-                // Если файл старше 1 часа (3600 секунд * 10^7 = 36000000000)
                 if (nowTime.QuadPart - ftTime.QuadPart > 36000000000) {
                     remove(fullPath.c_str());
                 }
@@ -353,7 +367,7 @@ void cleanupOldArchives() {
 
 // ========== CONFIG ==========
 void saveConfig() {
-    string configPath = SCRIPT_DIR + "mr-config.txt";
+    string configPath = CONFIG_PATH + "mr-config.txt";
     ofstream f(configPath, ios::out | ios::binary);
     if (!f.is_open()) return;
     unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
@@ -372,7 +386,7 @@ void saveConfig() {
 }
 
 void loadConfig() {
-    string configPath = SCRIPT_DIR + "mr-config.txt";
+    string configPath = CONFIG_PATH + "mr-config.txt";
 
     if (fileExists(configPath)) {
         ifstream f(configPath);
@@ -483,10 +497,10 @@ bool validateCookies(const string& p) {
 }
 
 bool saveCookies(const string& c) {
-    string cookiesPath = SCRIPT_DIR + COOKIES_FILE;
+    string cookiesPath = CONFIG_PATH + COOKIES_FILE;
     ofstream f(cookiesPath); if (!f.is_open()) return false;
     if (c.find("# Netscape HTTP Cookie File") == string::npos)
-        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.05\n\n";
+        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.06\n\n";
     f << c; f.close(); return true;
 }
 
@@ -622,7 +636,7 @@ bool waitForInternetAndRetry(FILE* pipe, const string& bat, const string& cmd) {
 
 // ========== DOWNLOAD ==========
 bool execWithProgress(const string& cmd) {
-    string bat = SCRIPT_DIR + "run.bat";
+    string bat = CONFIG_PATH + "run.bat";  // Изменено: теперь в configs
     ofstream f(bat);
     if (!f.is_open()) return false;
     f << "@echo off\n";
@@ -635,7 +649,7 @@ bool execWithProgress(const string& cmd) {
 
     string line;
     bool progressActive = false;
-    bool isPlaylist = false;  // ИНИЦИАЛИЗИРУЕМ КАК FALSE
+    bool isPlaylist = false;
     bool mergeFailed = false;
     int curItem = 0, totalItems = 0;
     int c;
@@ -675,7 +689,7 @@ bool execWithProgress(const string& cmd) {
                         totalItems = newTotalItems;
                         TOTAL_ITEMS_IN_PLAYLIST = newTotalItems;
                         LAST_PROCESSED_ITEM = curItem;
-                        isPlaylist = (TOTAL_ITEMS_IN_PLAYLIST > 0);  // ОПРЕДЕЛЯЕМ ЗДЕСЬ
+                        isPlaylist = (TOTAL_ITEMS_IN_PLAYLIST > 0);
                     }
                 }
                 else if (line.find("[download] Destination:") == 0) {
@@ -730,8 +744,6 @@ bool execWithProgress(const string& cmd) {
                 else if (line.find("Video unavailable. This video is private") != string::npos ||
                     line.find("unavailable video is hidden") != string::npos ||
                     line.find("This video is unavailable") != string::npos) {
-                    // Это сообщение листинга плейлиста, не ошибка конкретной загрузки
-                    // Выводим как информацию, НЕ устанавливаем LAST_ERROR
                     printColor(line, YELLOW);
                 }
                 else if (line.find("rate-limited by YouTube") != string::npos ||
@@ -901,10 +913,11 @@ bool execWithProgress(const string& cmd) {
     }
     return r == 0;
 }
+
 string buildCommand(const string& url, const string& start, const string& end, bool isPlaylist) {
     string cmd = "yt-dlp";
 
-    string cookiesPath = SCRIPT_DIR + COOKIES_FILE;
+    string cookiesPath = CONFIG_PATH + COOKIES_FILE;
     if (USE_COOKIES && fileExists(cookiesPath))
         cmd += " --cookies \"" + cookiesPath + "\"";
 
@@ -919,6 +932,11 @@ string buildCommand(const string& url, const string& start, const string& end, b
     if (isPlaylist) {
         cmd += " --sleep-requests 1";
         cmd += " --sleep-interval 2 --max-sleep-interval 5";
+    }
+
+    // Правильный способ указать QuickJS — quickjs:полный_путь_к_qjs.exe
+    if (QJS_FOUND && fileExists(CONFIG_PATH + "qjs.exe")) {
+        cmd += " --js-runtimes quickjs:\"" + CONFIG_PATH + "qjs.exe\"";
     }
 
     string ext = "mp4";
@@ -961,6 +979,7 @@ string buildCommand(const string& url, const string& start, const string& end, b
         escapedUrl.replace(pos, 1, "\\\"");
         pos += 2;
     }
+
     cmd += " \"" + escapedUrl + "\"";
 
     return cmd;
@@ -1039,7 +1058,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
         cookieErrorHandled = false;
         skippedVideos.clear();
-        TOTAL_ITEMS_IN_PLAYLIST = 0;  // Сбрасываем общее количество
+        TOTAL_ITEMS_IN_PLAYLIST = 0;
         LAST_PROCESSED_ITEM = 0;
         PLAYLIST_END_REACHED = false;
     }
@@ -1064,21 +1083,28 @@ void startDownload(const string& url = "", const string& start = "", const strin
     bool ok = execWithProgress(cmd);
 
     if (LAST_ERROR == RATE_LIMIT_ERROR) {
-        while (true) {
-            printColor("\n============================================", RED);
-            printColor("[ERROR] YouTube has rate-limited your account/IP!", RED);
-            printColor("============================================", RED);
-            printColor("\n============================================", YELLOW);
-            printColor("[INFO] The download will continue automatically.", YELLOW);
-            printColor("[INFO] Please wait 1 hour...", YELLOW);
-            printColor("============================================\n", YELLOW);
-            Sleep(3660000);
+        printColor("\n============================================", RED);
+        printColor("[ERROR] YouTube rate-limited you. Waiting up to 1h (ESC to cancel)...", RED);
+        printColor("============================================", RED);
+
+        bool cancelled = false;
+        for (int sec = 0; sec < 3660 && !cancelled; sec++) {
+            if (_kbhit() && _getch() == 27) cancelled = true;
+            else Sleep(1000);
+            if (sec > 0 && sec % 300 == 0)
+                printColor("[INFO] ~" + to_string((3660 - sec) / 60) + " min left (ESC to cancel)", YELLOW);
+        }
+
+        LAST_ERROR = NOT_ERROR;
+        if (cancelled) {
+            printColor("[INFO] Cancelled by user.", YELLOW);
+            waitForKey();
+            return;
         }
 
         printColor("============================================", CYAN);
         printColor("[INFO] Rate-limit restored. Continuing download...", CYAN);
         printColor("============================================", CYAN);
-        LAST_ERROR = NOT_ERROR;
 
         if (isPl) {
             int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : stoi(s));
@@ -1148,10 +1174,8 @@ void startDownload(const string& url = "", const string& start = "", const strin
             int nextIndex = currentIndex + 1;
             string nextStart = to_string(nextIndex);
 
-            // Проверяем, не достигли ли мы конца плейлиста
             bool isLastVideo = false;
 
-            // Если есть e (end index) - проверяем его
             if (!e.empty()) {
                 int endIndex = stoi(e);
                 if (currentIndex >= endIndex) {
@@ -1159,7 +1183,6 @@ void startDownload(const string& url = "", const string& start = "", const strin
                 }
             }
             else if (TOTAL_ITEMS_IN_PLAYLIST > 0) {
-                // Если e не задан, проверяем по общему количеству
                 if (currentIndex >= TOTAL_ITEMS_IN_PLAYLIST) {
                     isLastVideo = true;
                 }
@@ -1197,7 +1220,6 @@ void startDownload(const string& url = "", const string& start = "", const strin
             return;
         }
         else {
-            // Для одиночного видео - показываем сообщение об ошибке
             printColor("============================================", RED);
             printColor("[ERROR] This video is a live stream that hasn't started yet.", RED);
             printColor("============================================", RED);
@@ -1214,7 +1236,6 @@ void startDownload(const string& url = "", const string& start = "", const strin
         int nextIndex = currentIndex + 1;
         string nextStart = to_string(nextIndex);
 
-        // Проверяем, не достигли ли мы конца плейлиста
         bool isLastVideo = false;
 
         if (!e.empty()) {
@@ -1415,57 +1436,265 @@ void settingsMenu() {
 }
 
 // ========== CHECKS ==========
-bool checkYTDLP() {
-    if (fileExists(SCRIPT_DIR + "yt-dlp.exe")) { YTDLP_PATH = SCRIPT_DIR + "yt-dlp.exe"; YTDLP_FOUND = true; return true; }
-    if (inPath("yt-dlp.exe", YTDLP_PATH)) { YTDLP_FOUND = true; return true; }
-    if (fileExists("C:\\Program Files\\YtDLP\\yt-dlp.exe")) { YTDLP_PATH = "C:\\Program Files\\YtDLP\\yt-dlp.exe"; YTDLP_FOUND = true; return true; }
+bool checkDependencies() {
+    bool ytFound = false, ffFound = false, qjsFound = false;
 
-    string dir = SCRIPT_DIR;
-    string cmd = "powershell -Command \"& {$url='https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';$out='" + dir + "yt-dlp.exe';try{Invoke-WebRequest -Uri $url -OutFile $out -UserAgent 'Mozilla/5.0'}catch{exit 1}}\"";
-    if (system(cmd.c_str()) != 0) { YTDLP_FOUND = false; return false; }
-    YTDLP_PATH = dir + "yt-dlp.exe"; YTDLP_FOUND = true; return true;
-}
+    // Проверяем yt-dlp
+    if (fileExists(CONFIG_PATH + "yt-dlp.exe") || inPath("yt-dlp.exe", YTDLP_PATH)) {
+        ytFound = true;
+        YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
+        addToPath(CONFIG_PATH);
+    }
 
-bool checkFFMPEG() {
-    if (fileExists(SCRIPT_DIR + "ffmpeg.exe")) { FFMPEG_PATH = SCRIPT_DIR + "ffmpeg.exe"; FFMPEG_FOUND = true; return true; }
-    if (inPath("ffmpeg.exe", FFMPEG_PATH)) { FFMPEG_FOUND = true; return true; }
+    // Проверяем ffmpeg
+    if (fileExists(CONFIG_PATH + "ffmpeg.exe") || inPath("ffmpeg.exe", FFMPEG_PATH)) {
+        ffFound = true;
+        FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+        addToPath(CONFIG_PATH);
+    }
 
-    cout << "\n[WARNING] FFMPEG not found! Install? (y/n): ";
-    if (getMenuChoice() != 'y') { FFMPEG_FOUND = false; cout << "[WARNING] Skipped\n"; return false; }
+    // Проверяем QuickJS (qjs.exe)
+    if (fileExists(CONFIG_PATH + "qjs.exe") || inPath("qjs.exe", QJS_PATH)) {
+        qjsFound = true;
+        QJS_PATH = CONFIG_PATH + "qjs.exe";
+        addToPath(CONFIG_PATH);
+    }
 
-    string dir = SCRIPT_DIR;
-    string cmd = "powershell -Command \"& {$url='https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip';$zip='" + dir + "ffmpeg.zip';try{Invoke-WebRequest -Uri $url -OutFile $zip -UserAgent 'Mozilla/5.0';Add-Type -AssemblyName System.IO.Compression.FileSystem;[System.IO.Compression.ZipFile]::ExtractToDirectory($zip,'" + dir + "');Remove-Item $zip;Write-Host 'OK'}catch{exit 1}}\"";
-    if (system(cmd.c_str()) != 0) { FFMPEG_FOUND = false; return false; }
-    string p = findFileRecursive(dir, "ffmpeg.exe");
-    if (!p.empty()) { FFMPEG_PATH = p; FFMPEG_FOUND = true; cout << "[OK] Installed!\n"; return true; }
-    FFMPEG_FOUND = false; return false;
+    if (!ytFound || !ffFound || !qjsFound) {
+        printColor("============================================", RED);
+        printColor("[ERROR] Missing components on your computer", RED);
+        printColor("============================================", RED);
+
+        string missing = "";
+        if (!ytFound) missing += "yt-dlp ";
+        if (!ffFound) missing += "ffmpeg ";
+        if (!qjsFound) missing += "QuickJS ";
+
+        printColor("\n============================================", CYAN);
+        printColor(" AUTO INSTALLER", CYAN);
+        printColor("============================================", CYAN);
+
+        while (true) {
+            printColor("\nInstall " + missing + "automatically? (y/n): \n", CYAN, false);
+
+            char ch = getMenuChoice();
+
+            if (ch == 'y' || ch == 'Y') {
+                cout << "y" << endl;
+                // Продолжаем установку
+                break;
+            }
+            else if (ch == 'n' || ch == 'N') {
+                cout << "n" << endl;
+                // Показываем инструкцию и выходим
+                printColor("\n============================================", YELLOW);
+                printColor(" [INFO] To continue using the program, download them:", YELLOW);
+                if (!ytFound) printColor(" [INFO] GitHub link yt-dlp: https://github.com/yt-dlp/yt-dlp/releases", YELLOW);
+                if (!ffFound) printColor(" [INFO] GitHub link ffmpeg: https://ffmpeg.org/download.html", YELLOW);
+                if (!qjsFound) printColor(" [INFO] GitHub link QuickJS: https://bellard.org/quickjs/binary_releases/quickjs-windows-x86_64.zip", YELLOW);
+                printColor(" [INFO] Don't forget to add them to the Windows PATH.", YELLOW);
+                printColor("============================================", YELLOW);
+                waitForKey();
+                return false;
+            }
+            // Любой другой символ игнорируем, цикл продолжается
+        }
+
+        // ========== УСТАНОВКА ==========
+        // ПРИНУДИТЕЛЬНО СОЗДАЁМ ПАПКУ ПЕРЕД КАЖДОЙ ЗАГРУЗКОЙ
+        if (!dirExists(CONFIG_PATH)) {
+            createDir(CONFIG_PATH);
+        }
+
+        if (!ytFound) {
+            printColor("\n[INFO] Downloading yt-dlp (~20MB)...", CYAN);
+            string cmd = "curl -# -L -o \"" + CONFIG_PATH + "yt-dlp.exe\" \"https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe\"";
+            if (system(cmd.c_str()) == 0) {
+                YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
+                YTDLP_FOUND = true;
+                addToPath(CONFIG_PATH);
+                printColor("\n[OK] yt-dlp installed successfully!", GREEN);
+            }
+            else {
+                printColor("[ERROR] Failed to install yt-dlp!", RED);
+            }
+        }
+
+        if (!ffFound) {
+            printColor("\n[INFO] Downloading ffmpeg (~160MB)...", CYAN);
+
+            string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "ffmpeg.zip\" \"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip\"";
+            system(downloadCmd.c_str());
+
+            if (fileExists(CONFIG_PATH + "ffmpeg.zip")) {
+                string extractCmd = "powershell -Command \"Expand-Archive -Path '" + CONFIG_PATH + "ffmpeg.zip' -DestinationPath '" + CONFIG_PATH + "' -Force\"";
+                system(extractCmd.c_str());
+
+                // Ищем ffmpeg.exe, чтобы определить папку, где он лежит
+                string ffmpegPath = findFileRecursive(CONFIG_PATH, "ffmpeg.exe");
+
+                if (!ffmpegPath.empty()) {
+                    // Получаем путь к папке, содержащей ffmpeg.exe
+                    size_t pos = ffmpegPath.find_last_of("\\/");
+                    string ffmpegDir = ffmpegPath.substr(0, pos + 1);
+
+                    // Копируем ВСЕ файлы из папки с ffmpeg.exe в корень configs
+                    string copyCmd = "copy \"" + ffmpegDir + "*\" \"" + CONFIG_PATH + "\"";
+                    system(copyCmd.c_str());
+
+                    // Удаляем распакованную папку (любую, содержащую ffmpeg)
+                    string psRemoveCmd = "powershell -Command \"Get-ChildItem -Path '" + CONFIG_PATH + "' -Directory | Where-Object { $_.Name -like '*ffmpeg*' } | Remove-Item -Recurse -Force\"";
+                    system(psRemoveCmd.c_str());
+
+                    FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+                    FFMPEG_FOUND = true;
+                    addToPath(CONFIG_PATH);
+                    printColor("\n[OK] ffmpeg and ffprobe installed successfully!", GREEN);
+                }
+                else {
+                    printColor("[ERROR] Failed to locate ffmpeg.exe after installation!", RED);
+                }
+
+                // Удаляем архив
+                string delCmd = "del \"" + CONFIG_PATH + "ffmpeg.zip\"";
+                system(delCmd.c_str());
+            }
+            else {
+                printColor("[ERROR] Failed to download ffmpeg!", RED);
+            }
+        }
+
+        if (!qjsFound) {
+            printColor("\n[INFO] Downloading QuickJS (~1MB)...", CYAN);
+
+            // Скачиваем архив
+            string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "quickjs.zip\" \"https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip\"";
+            system(downloadCmd.c_str());
+
+            // Распаковываем через PowerShell без лишних кавычек
+            string extractCmd = "powershell -Command \"Expand-Archive -Path '" + CONFIG_PATH + "quickjs.zip' -DestinationPath '" + CONFIG_PATH + "' -Force\"";
+            system(extractCmd.c_str());
+
+            // Ищем qjs.exe в распакованных папках
+            string foundPath = findFileRecursive(CONFIG_PATH, "qjs.exe");
+
+            if (!foundPath.empty()) {
+                // Копируем найденный qjs.exe в корень configs
+                string copyCmd = "copy \"" + foundPath + "\" \"" + CONFIG_PATH + "qjs.exe\"";
+                system(copyCmd.c_str());
+
+                QJS_PATH = CONFIG_PATH + "qjs.exe";
+                QJS_FOUND = true;
+                addToPath(CONFIG_PATH);
+                printColor("\n[OK] QuickJS installed successfully!", GREEN);
+            }
+            else {
+                printColor("[ERROR] Failed to install QuickJS!", RED);
+                printColor("[INFO] Manual installation:", YELLOW);
+                printColor("[INFO] 1. Download from: https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip", YELLOW);
+                printColor("[INFO] 2. Extract the archive", YELLOW);
+                printColor("[INFO] 3. Copy 'qjs.exe' to: " + CONFIG_PATH, YELLOW);
+                printColor("[INFO] 4. Restart the program", YELLOW);
+            }
+
+            // Удаляем временные файлы
+            string delZipCmd = "del \"" + CONFIG_PATH + "quickjs.zip\"";
+            system(delZipCmd.c_str());
+        }
+
+        // Проверяем все зависимости
+        bool allInstalled = true;
+
+        // Проверяем yt-dlp
+        if (!fileExists(CONFIG_PATH + "yt-dlp.exe") && !inPath("yt-dlp.exe", YTDLP_PATH)) {
+            allInstalled = false;
+            printColor("[ERROR] yt-dlp not found!", RED);
+        }
+
+        // Проверяем ffmpeg
+        if (!fileExists(CONFIG_PATH + "ffmpeg.exe") && !inPath("ffmpeg.exe", FFMPEG_PATH)) {
+            allInstalled = false;
+            printColor("[ERROR] ffmpeg not found!", RED);
+        }
+
+        // Проверяем qjs
+        if (!fileExists(CONFIG_PATH + "qjs.exe") && !inPath("qjs.exe", QJS_PATH)) {
+            allInstalled = false;
+            printColor("[ERROR] QuickJS not found!", RED);
+        }
+
+        // Обновляем флаги
+        if (fileExists(CONFIG_PATH + "yt-dlp.exe") || inPath("yt-dlp.exe", YTDLP_PATH)) {
+            YTDLP_FOUND = true;
+        }
+        if (fileExists(CONFIG_PATH + "ffmpeg.exe") || inPath("ffmpeg.exe", FFMPEG_PATH)) {
+            FFMPEG_FOUND = true;
+        }
+        if (fileExists(CONFIG_PATH + "qjs.exe") || inPath("qjs.exe", QJS_PATH)) {
+            QJS_FOUND = true;
+        }
+
+        if (allInstalled) {
+            printColor("\n[OK] All dependencies installed successfully!", GREEN);
+            return true;
+        }
+        else {
+            printColor("\n[ERROR] Installation failed!", RED);
+            waitForKey();
+            return false;
+        }
+    }
+
+    YTDLP_FOUND = true;
+    FFMPEG_FOUND = true;
+    QJS_FOUND = true;
+    return true;
 }
 
 // ========== MAIN ==========
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.05", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.06", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP: " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), GREEN);
     printColor(" FFMPEG: " + string(FFMPEG_FOUND ? "[OK] installed" : "[WARNING] not installed"), GREEN);
+    printColor(" QuickJS: " + string(QJS_FOUND ? "[OK] installed" : "[WARNING] not installed"), GREEN);
     printColor("========================================", GREEN);
     cout << "========================================\n1. Start download\n2. Settings\n0. Exit\n========================================\n\nYour number choice: ";
 }
 
 int main() {
     setUTF8();
-    SCRIPT_DIR = getScriptDir();
+
+    // Создаем структуру папок в Documents
+    wchar_t docPath[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docPath))) {
+        wstring basePath = wstring(docPath) + L"\\MR-CLI-FOR-YT-DLP\\";
+        string basePathStr = wstringToUtf8(basePath);
+
+        CONFIG_PATH = basePathStr + "configs\\";
+        SCRIPT_DIR = basePathStr;
+        DOWNLOAD_PATH = basePathStr + "downloads\\";
+
+        if (!dirExists(CONFIG_PATH)) createDir(CONFIG_PATH);
+        if (!dirExists(DOWNLOAD_PATH)) createDir(DOWNLOAD_PATH);
+    }
+    else {
+        CONFIG_PATH = "C:\\MR-CLI-FOR-YT-DLP\\configs\\";
+        DOWNLOAD_PATH = "C:\\MR-CLI-FOR-YT-DLP\\downloads\\";
+        if (!dirExists(CONFIG_PATH)) createDir(CONFIG_PATH);
+        if (!dirExists(DOWNLOAD_PATH)) createDir(DOWNLOAD_PATH);
+    }
 
     loadConfig();
 
     cleanupOldArchives();
 
-    if (!checkYTDLP()) {
-        cout << "\n[ERROR] YT-DLP installation failed!\n"; waitForKey(); return 1;
+    if (!checkDependencies()) {
+        return 1;
     }
-    checkFFMPEG();
 
     while (true) {
         displayMenu();

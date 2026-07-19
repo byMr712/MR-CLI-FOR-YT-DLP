@@ -1,7 +1,7 @@
 # MR CLI FOR YT DLP
 **MR CLI FOR YT DLP** is a command-line interface wrapper for original yt-dlp.
 
-[![Version](https://img.shields.io/badge/version-1.05-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.06-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
