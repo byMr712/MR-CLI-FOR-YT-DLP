@@ -23,7 +23,8 @@ enum ErrorType {
     AGE_ERROR = 2,
     LIVE_ERROR = 3,
     MERGE_ERROR = 4,
-    VIDEO_ERROR = 5
+    VIDEO_ERROR = 5,
+    RATE_LIMIT_ERROR = 6
 };
 
 string YTDLP_PATH, FFMPEG_PATH, SCRIPT_DIR, DOWNLOAD_PATH;
@@ -37,6 +38,7 @@ string ARCHIVE_PATH = "";
 int TOTAL_ITEMS_IN_PLAYLIST = 0;
 bool PLAYLIST_END_REACHED = false;
 int currentIndex = 0;
+int LAST_PROCESSED_ITEM = 0;
 
 // Resume
 string RESUME_URL, RESUME_START, RESUME_END;
@@ -484,7 +486,7 @@ bool saveCookies(const string& c) {
     string cookiesPath = SCRIPT_DIR + COOKIES_FILE;
     ofstream f(cookiesPath); if (!f.is_open()) return false;
     if (c.find("# Netscape HTTP Cookie File") == string::npos)
-        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.04\n\n";
+        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.05\n\n";
     f << c; f.close(); return true;
 }
 
@@ -672,6 +674,7 @@ bool execWithProgress(const string& cmd) {
                         curItem = newCurItem;
                         totalItems = newTotalItems;
                         TOTAL_ITEMS_IN_PLAYLIST = newTotalItems;
+                        LAST_PROCESSED_ITEM = curItem;
                         isPlaylist = (TOTAL_ITEMS_IN_PLAYLIST > 0);  // ОПРЕДЕЛЯЕМ ЗДЕСЬ
                     }
                 }
@@ -723,6 +726,21 @@ bool execWithProgress(const string& cmd) {
                 }
                 else if (line.find("WARNING") != string::npos &&
                     line.find("No title found in player responses") != string::npos) {
+                }
+                else if (line.find("Video unavailable. This video is private") != string::npos ||
+                    line.find("unavailable video is hidden") != string::npos ||
+                    line.find("This video is unavailable") != string::npos) {
+                    // Это сообщение листинга плейлиста, не ошибка конкретной загрузки
+                    // Выводим как информацию, НЕ устанавливаем LAST_ERROR
+                    printColor(line, YELLOW);
+                }
+                else if (line.find("rate-limited by YouTube") != string::npos ||
+                    line.find("Your account has been rate-limited") != string::npos) {
+                    LAST_ERROR = RATE_LIMIT_ERROR;
+                    printColor("\n[RATE LIMIT] " + line, RED);
+                    _pclose(pipe);
+                    remove(bat.c_str());
+                    return false;
                 }
                 else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
                     if (progressActive) { cout << endl; progressActive = false; }
@@ -878,6 +896,9 @@ bool execWithProgress(const string& cmd) {
         }
     }
 
+    if (totalItems > 0 && curItem >= totalItems) {
+        return true;
+    }
     return r == 0;
 }
 string buildCommand(const string& url, const string& start, const string& end, bool isPlaylist) {
@@ -893,6 +914,12 @@ string buildCommand(const string& url, const string& start, const string& end, b
 
     string fmt = buildFormat();
     cmd += " -f \"" + fmt + "\"";
+
+    // Защита от rate-limit только для плейлистов
+    if (isPlaylist) {
+        cmd += " --sleep-requests 1";
+        cmd += " --sleep-interval 2 --max-sleep-interval 5";
+    }
 
     string ext = "mp4";
     string tag = "";
@@ -1013,6 +1040,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
         cookieErrorHandled = false;
         skippedVideos.clear();
         TOTAL_ITEMS_IN_PLAYLIST = 0;  // Сбрасываем общее количество
+        LAST_PROCESSED_ITEM = 0;
         PLAYLIST_END_REACHED = false;
     }
 
@@ -1034,6 +1062,33 @@ void startDownload(const string& url = "", const string& start = "", const strin
     cout << endl;
 
     bool ok = execWithProgress(cmd);
+
+    if (LAST_ERROR == RATE_LIMIT_ERROR) {
+        while (true) {
+            printColor("\n============================================", RED);
+            printColor("[ERROR] YouTube has rate-limited your account/IP!", RED);
+            printColor("============================================", RED);
+            printColor("\n============================================", YELLOW);
+            printColor("[INFO] The download will continue automatically.", YELLOW);
+            printColor("[INFO] Please wait 1 hour...", YELLOW);
+            printColor("============================================\n", YELLOW);
+            Sleep(3660000);
+        }
+
+        printColor("============================================", CYAN);
+        printColor("[INFO] Rate-limit restored. Continuing download...", CYAN);
+        printColor("============================================", CYAN);
+        LAST_ERROR = NOT_ERROR;
+
+        if (isPl) {
+            int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : stoi(s));
+            startDownload(u, to_string(currentIndex), e, true, false);
+        }
+        else {
+            startDownload(u, s, e, isPl, false);
+        }
+        return;
+    }
 
     if (LAST_ERROR == COOKIE_ERROR || LAST_ERROR == AGE_ERROR) {
         cookieErrorHandled = true;
@@ -1089,7 +1144,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
     if (LAST_ERROR == LIVE_ERROR) {
         if (isPl) {
-            currentIndex = s.empty() ? 1 : stoi(s);
+            currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : stoi(s));
             int nextIndex = currentIndex + 1;
             string nextStart = to_string(nextIndex);
 
@@ -1155,7 +1210,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
     // ========== ОБРАБОТКА ПЛЕЙЛИСТА ==========
     if (!ok && isPl) {
-        int currentIndex = s.empty() ? 1 : stoi(s);
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : stoi(s));
         int nextIndex = currentIndex + 1;
         string nextStart = to_string(nextIndex);
 
@@ -1390,7 +1445,7 @@ bool checkFFMPEG() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.04", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.05", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP: " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), GREEN);
