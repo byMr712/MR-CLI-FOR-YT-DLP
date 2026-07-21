@@ -225,17 +225,34 @@ bool inPath(const string& f, string& full) {
 
 // Добавление папки в PATH
 // Добавление папки в PATH (постоянно для пользователя)
+
+int execCmd(const string& cmd) {
+    wstring wcmd = utf8ToWstring(cmd);
+    return _wsystem(wcmd.c_str());
+}
+
+string psEscape(const string& s) {
+    string r = s;
+    size_t p = 0;
+    while ((p = r.find("'", p)) != string::npos) {
+        r.replace(p, 1, "''");
+        p += 2;
+    }
+    return r;
+}
+
 void addToPath(const string& dir) {
     // 1. Добавляем в PATH текущего процесса
     string currentPath = getEnv("PATH");
     if (currentPath.find(dir) == string::npos) {
         string newPath = dir + ";" + currentPath;
-        SetEnvironmentVariableA("PATH", newPath.c_str());
+        SetEnvironmentVariableW(L"PATH", utf8ToWstring(newPath).c_str());
     }
 
     // 2. Добавляем в системный PATH пользователя (постоянно)
-    string psCmd = "powershell -Command \"$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($currentPath -notlike '*" + dir + "*') { [Environment]::SetEnvironmentVariable('PATH', $currentPath + ';" + dir + "', 'User') }\"";
-    system(psCmd.c_str());
+    string escapedDir = psEscape(dir);
+    string psCmd = "powershell -Command \"$currentPath = [Environment]::GetEnvironmentVariable('PATH', 'User'); if ($currentPath -notlike '*" + escapedDir + "*') { [Environment]::SetEnvironmentVariable('PATH', $currentPath + ';" + escapedDir + "', 'User') }\"";
+    execCmd(psCmd);
 }
 
 bool parseDownloadLine(const string& line, string& percent, string& speed, string& eta) {
@@ -500,7 +517,7 @@ bool saveCookies(const string& c) {
     string cookiesPath = CONFIG_PATH + COOKIES_FILE;
     ofstream f(cookiesPath); if (!f.is_open()) return false;
     if (c.find("# Netscape HTTP Cookie File") == string::npos)
-        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.06\n\n";
+        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.07\n\n";
     f << c; f.close(); return true;
 }
 
@@ -644,7 +661,8 @@ bool execWithProgress(const string& cmd) {
     f << cmd << " 2>&1\n";
     f.close();
 
-    FILE* pipe = _popen(("\"" + bat + "\"").c_str(), "r");
+    wstring wbat = L"\"" + utf8ToWstring(bat) + L"\"";
+    FILE* pipe = _wpopen(wbat.c_str(), L"r");
     if (!pipe) { remove(bat.c_str()); return false; }
 
     string line;
@@ -869,7 +887,7 @@ bool execWithProgress(const string& cmd) {
 
                 printColor("[INFO] Merge attempt " + to_string(attempt) + " of " + to_string(maxRetries), YELLOW);
                 printColor("[INFO] Running: " + mergeCmd, CYAN);
-                int mergeResult = system(mergeCmd.c_str());
+                int mergeResult = execCmd(mergeCmd);
 
                 if (mergeResult == 0) {
                     printColor("[OK] Manual merge successful on attempt " + to_string(attempt) + "!", GREEN);
@@ -1505,11 +1523,12 @@ bool checkDependencies() {
         if (!dirExists(CONFIG_PATH)) {
             createDir(CONFIG_PATH);
         }
+        string escapedConfig = psEscape(CONFIG_PATH);
 
         if (!ytFound) {
             printColor("\n[INFO] Downloading yt-dlp (~20MB)...", CYAN);
             string cmd = "curl -# -L -o \"" + CONFIG_PATH + "yt-dlp.exe\" \"https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe\"";
-            if (system(cmd.c_str()) == 0) {
+            if (execCmd(cmd) == 0) {
                 YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
                 YTDLP_FOUND = true;
                 addToPath(CONFIG_PATH);
@@ -1524,11 +1543,11 @@ bool checkDependencies() {
             printColor("\n[INFO] Downloading ffmpeg (~160MB)...", CYAN);
 
             string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "ffmpeg.zip\" \"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip\"";
-            system(downloadCmd.c_str());
+            execCmd(downloadCmd);
 
             if (fileExists(CONFIG_PATH + "ffmpeg.zip")) {
-                string extractCmd = "powershell -Command \"Expand-Archive -Path '" + CONFIG_PATH + "ffmpeg.zip' -DestinationPath '" + CONFIG_PATH + "' -Force\"";
-                system(extractCmd.c_str());
+                string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "ffmpeg.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
+                execCmd(extractCmd);
 
                 // Ищем ffmpeg.exe, чтобы определить папку, где он лежит
                 string ffmpegPath = findFileRecursive(CONFIG_PATH, "ffmpeg.exe");
@@ -1540,11 +1559,11 @@ bool checkDependencies() {
 
                     // Копируем ВСЕ файлы из папки с ffmpeg.exe в корень configs
                     string copyCmd = "copy \"" + ffmpegDir + "*\" \"" + CONFIG_PATH + "\"";
-                    system(copyCmd.c_str());
+                    execCmd(copyCmd);
 
                     // Удаляем распакованную папку (любую, содержащую ffmpeg)
-                    string psRemoveCmd = "powershell -Command \"Get-ChildItem -Path '" + CONFIG_PATH + "' -Directory | Where-Object { $_.Name -like '*ffmpeg*' } | Remove-Item -Recurse -Force\"";
-                    system(psRemoveCmd.c_str());
+                    string psRemoveCmd = "powershell -Command \"Get-ChildItem -Path '" + escapedConfig + "' -Directory | Where-Object { $_.Name -like '*ffmpeg*' } | Remove-Item -Recurse -Force\"";
+                    execCmd(psRemoveCmd);
 
                     FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
                     FFMPEG_FOUND = true;
@@ -1557,7 +1576,7 @@ bool checkDependencies() {
 
                 // Удаляем архив
                 string delCmd = "del \"" + CONFIG_PATH + "ffmpeg.zip\"";
-                system(delCmd.c_str());
+                execCmd(delCmd);
             }
             else {
                 printColor("[ERROR] Failed to download ffmpeg!", RED);
@@ -1569,11 +1588,11 @@ bool checkDependencies() {
 
             // Скачиваем архив
             string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "quickjs.zip\" \"https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip\"";
-            system(downloadCmd.c_str());
+            execCmd(downloadCmd);
 
             // Распаковываем через PowerShell без лишних кавычек
-            string extractCmd = "powershell -Command \"Expand-Archive -Path '" + CONFIG_PATH + "quickjs.zip' -DestinationPath '" + CONFIG_PATH + "' -Force\"";
-            system(extractCmd.c_str());
+            string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "quickjs.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
+            execCmd(extractCmd);
 
             // Ищем qjs.exe в распакованных папках
             string foundPath = findFileRecursive(CONFIG_PATH, "qjs.exe");
@@ -1581,7 +1600,7 @@ bool checkDependencies() {
             if (!foundPath.empty()) {
                 // Копируем найденный qjs.exe в корень configs
                 string copyCmd = "copy \"" + foundPath + "\" \"" + CONFIG_PATH + "qjs.exe\"";
-                system(copyCmd.c_str());
+                execCmd(copyCmd);
 
                 QJS_PATH = CONFIG_PATH + "qjs.exe";
                 QJS_FOUND = true;
@@ -1599,7 +1618,7 @@ bool checkDependencies() {
 
             // Удаляем временные файлы
             string delZipCmd = "del \"" + CONFIG_PATH + "quickjs.zip\"";
-            system(delZipCmd.c_str());
+            execCmd(delZipCmd);
         }
 
         // Проверяем все зависимости
@@ -1655,7 +1674,7 @@ bool checkDependencies() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.06", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.07", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP: " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), GREEN);
