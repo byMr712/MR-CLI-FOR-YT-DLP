@@ -13,6 +13,7 @@
 #include <commdlg.h>
 #include <locale>
 #include <cctype>
+#include <io.h>
 
 using namespace std;
 
@@ -308,78 +309,8 @@ string findFileRecursive(const string& dir, const string& f) {
 }
 
 // ========== DOWNLOAD ARCHIVE ==========
-string createTempArchive() {
-    char tempPath[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempPath);
-
-    time_t now = time(nullptr);
-    struct tm timeinfo;
-    localtime_s(&timeinfo, &now);
-
-    char timestamp[20];
-    strftime(timestamp, sizeof(timestamp), "%Y%m%d_%H%M%S", &timeinfo);
-
-    string archiveName = "ytdlp_archive_" + string(timestamp) + ".txt";
-    string fullPath = string(tempPath) + archiveName;
-
-    ofstream f(fullPath);
-    if (f.is_open()) {
-        f.close();
-        return fullPath;
-    }
-    return "";
-}
-
-void deleteArchive(const string& path) {
-    if (!path.empty() && fileExists(path)) {
-        remove(path.c_str());
-    }
-}
-
-void cleanupOldArchives() {
-    char tempPath[MAX_PATH];
-    GetTempPathA(MAX_PATH, tempPath);
-
-    string searchPattern = string(tempPath) + "ytdlp_archive_*.txt";
-    WIN32_FIND_DATAA fd;
-    HANDLE hFind = FindFirstFileA(searchPattern.c_str(), &fd);
-
-    if (hFind != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                string fullPath = string(tempPath) + fd.cFileName;
-                FILETIME ft = fd.ftCreationTime;
-                SYSTEMTIME st;
-                FileTimeToSystemTime(&ft, &st);
-
-                time_t currentTime = time(nullptr);
-                struct tm now;
-                localtime_s(&now, &currentTime);
-
-                SYSTEMTIME nowSt;
-                nowSt.wYear = now.tm_year + 1900;
-                nowSt.wMonth = now.tm_mon + 1;
-                nowSt.wDay = now.tm_mday;
-                nowSt.wHour = now.tm_hour;
-                nowSt.wMinute = now.tm_min;
-                nowSt.wSecond = now.tm_sec;
-
-                FILETIME nowFt;
-                SystemTimeToFileTime(&nowSt, &nowFt);
-
-                ULARGE_INTEGER ftTime, nowTime;
-                ftTime.LowPart = ft.dwLowDateTime;
-                ftTime.HighPart = ft.dwHighDateTime;
-                nowTime.LowPart = nowFt.dwLowDateTime;
-                nowTime.HighPart = nowFt.dwHighDateTime;
-
-                if (nowTime.QuadPart - ftTime.QuadPart > 36000000000) {
-                    remove(fullPath.c_str());
-                }
-            }
-        } while (FindNextFileA(hFind, &fd) != 0);
-        FindClose(hFind);
-    }
+string getArchivePath() {
+    return CONFIG_PATH + "archive.txt";
 }
 
 // ========== CONFIG ==========
@@ -517,7 +448,7 @@ bool saveCookies(const string& c) {
     string cookiesPath = CONFIG_PATH + COOKIES_FILE;
     ofstream f(cookiesPath); if (!f.is_open()) return false;
     if (c.find("# Netscape HTTP Cookie File") == string::npos)
-        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.07\n\n";
+        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.08\n\n";
     f << c; f.close(); return true;
 }
 
@@ -620,14 +551,14 @@ bool isNetworkError(const string& line) {
 
 // ========== CHECK INTERNET ==========
 bool checkInternet() {
-    string cmd = "curl -s -o nul -I --connect-timeout 5 https://youtube.com";
-    if (system(cmd.c_str()) == 0) {
-        return true;
-    }
+    string cmd = "curl -s -o nul --connect-timeout 10 https://youtube.com";
+    if (system(cmd.c_str()) == 0) return true;
 
-    if (system("ping -n 1 www.youtube.com > nul 2>&1") == 0) {
-        return true;
-    }
+    cmd = "ping -n 1 8.8.8.8 > nul 2>&1";
+    if (system(cmd.c_str()) == 0) return true;
+
+    cmd = "ping -n 1 www.youtube.com > nul 2>&1";
+    if (system(cmd.c_str()) == 0) return true;
 
     return false;
 }
@@ -676,7 +607,33 @@ bool execWithProgress(const string& cmd) {
     string audioFile = "";
     string lastLine = "";
 
-    while ((c = fgetc(pipe)) != EOF) {
+    HANDLE hPipe = (HANDLE)_get_osfhandle(_fileno(pipe));
+    DWORD bytesAvail;
+    int idleSeconds = 0;
+    const int IDLE_TIMEOUT = 1;
+
+    while (true) {
+        if (PeekNamedPipe(hPipe, NULL, 0, NULL, &bytesAvail, NULL) && bytesAvail > 0) {
+            c = fgetc(pipe);
+            idleSeconds = 0;
+        }
+        else {
+            if (!PeekNamedPipe(hPipe, NULL, 0, NULL, &bytesAvail, NULL)) {
+                break;
+            }
+            idleSeconds++;
+            if (idleSeconds >= IDLE_TIMEOUT) {
+                if (!checkInternet()) {
+                    LAST_ERROR = VIDEO_ERROR;
+                    system("taskkill /f /im yt-dlp.exe > nul 2>&1");
+                    waitForInternetAndRetry(pipe, bat, cmd);
+                    return execWithProgress(cmd);
+                }
+                idleSeconds = 0;
+            }
+            Sleep(1000);
+            continue;
+        }
         if (c == '\r' || c == '\n') {
             if (!line.empty()) {
                 string percent, speed, eta;
@@ -694,9 +651,9 @@ bool execWithProgress(const string& cmd) {
                 if ((line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) && isNetworkError(line)) {
                     if (!checkInternet()) {
                         LAST_ERROR = VIDEO_ERROR;
-                        if (waitForInternetAndRetry(pipe, bat, cmd)) {
-                            return execWithProgress(cmd);
-                        }
+                        system("taskkill /f /im yt-dlp.exe > nul 2>&1");
+                        waitForInternetAndRetry(pipe, bat, cmd);
+                        return execWithProgress(cmd);
                     }
                 }
 
@@ -838,6 +795,7 @@ bool execWithProgress(const string& cmd) {
         if ((line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) && isNetworkError(line)) {
             if (!checkInternet()) {
                 LAST_ERROR = VIDEO_ERROR;
+                system("taskkill /f /im yt-dlp.exe > nul 2>&1");
                 if (waitForInternetAndRetry(pipe, bat, cmd)) {
                     return execWithProgress(cmd);
                 }
@@ -1674,7 +1632,7 @@ bool checkDependencies() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.07", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.08", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP: " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), GREEN);
@@ -1707,9 +1665,8 @@ int main() {
         if (!dirExists(DOWNLOAD_PATH)) createDir(DOWNLOAD_PATH);
     }
 
+    ARCHIVE_PATH = getArchivePath();
     loadConfig();
-
-    cleanupOldArchives();
 
     if (!checkDependencies()) {
         return 1;
