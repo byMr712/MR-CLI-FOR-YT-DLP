@@ -504,24 +504,54 @@ string buildFormat() {
     else if (VIDEO_RESOLUTION == "480") { exactRes = "height=480";   lteRes = "height<=480"; }
     else if (VIDEO_RESOLUTION == "360") { exactRes = "height=360";   lteRes = "height<=360"; }
 
-    string audioFmt;
-    if (AUDIO_FORMAT.find("M4A") != string::npos) audioFmt = "ba[ext=m4a]";
-    else if (AUDIO_FORMAT.find("Opus") != string::npos) audioFmt = "ba[ext=webm][acodec^=opus]";
-    else if (AUDIO_FORMAT.find("Vorbis") != string::npos) audioFmt = "ba[ext=webm][acodec^=vorbis]";
+    // Audio format lookup table (avoids if-else chain)
+    static const struct { const char* key; const char* fmt; } audioMap[] = {
+        {"M4A", "ba[ext=m4a]"},
+        {"Opus", "ba[ext=webm][acodec^=opus]"},
+        {"Vorbis", "ba[ext=webm][acodec^=vorbis]"}
+    };
+    const char* audioFmt = "ba[ext=m4a]";
+    for (auto& m : audioMap) {
+        if (AUDIO_FORMAT.find(m.key) != string::npos) { audioFmt = m.fmt; break; }
+    }
 
-    string codecFilter;
-    string ext;
-    if (VIDEO_FORMAT.find("MP4(AV1)") != string::npos) { codecFilter = "[vcodec^=av01]"; ext = "[ext=mp4]"; }
-    else if (VIDEO_FORMAT.find("MP4(H.264)") != string::npos) { codecFilter = "[vcodec^=avc1]"; ext = "[ext=mp4]"; }
-    else if (VIDEO_FORMAT.find("WEBM(AV1)") != string::npos) { codecFilter = "[vcodec^=av01]"; ext = "[ext=webm]"; }
-    else if (VIDEO_FORMAT.find("WEBM(VP9)") != string::npos) { codecFilter = "[vcodec^=vp9]";  ext = "[ext=webm]"; }
+    // Video format lookup table
+    static const struct { const char* key; const char* codec; const char* ext; } videoMap[] = {
+        {"MP4(AV1)",  "[vcodec^=av01]", "[ext=mp4]"},
+        {"MP4(H.264)", "[vcodec^=avc1]", "[ext=mp4]"},
+        {"WEBM(AV1)",  "[vcodec^=av01]", "[ext=webm]"},
+        {"WEBM(VP9)",  "[vcodec^=vp9]",  "[ext=webm]"}
+    };
+    const char* codecFilter = "[vcodec^=avc1]";
+    const char* ext = "[ext=mp4]";
+    for (auto& m : videoMap) {
+        if (VIDEO_FORMAT.find(m.key) != string::npos) { codecFilter = m.codec; ext = m.ext; break; }
+    }
 
-    string vExactPref = "bv" + ext + codecFilter + "[" + exactRes + "]";
-    string vExactAny = "bv[" + exactRes + "]";
-    string vLtePref = "bv" + ext + codecFilter + "[" + lteRes + "]";
-    string vLteAny = "bv[" + lteRes + "]";
+    // Pre-allocate result string to avoid reallocations
+    string vExactPref = "bv";
+    vExactPref += ext;
+    vExactPref += codecFilter;
+    vExactPref += "[";
+    vExactPref += exactRes;
+    vExactPref += "]";
 
-    if (ONLY_AUDIO) return audioFmt + "/bestaudio";
+    string vExactAny = "bv[";
+    vExactAny += exactRes;
+    vExactAny += "]";
+
+    string vLtePref = "bv";
+    vLtePref += ext;
+    vLtePref += codecFilter;
+    vLtePref += "[";
+    vLtePref += lteRes;
+    vLtePref += "]";
+
+    string vLteAny = "bv[";
+    vLteAny += lteRes;
+    vLteAny += "]";
+
+    if (ONLY_AUDIO) return string(audioFmt) + "/bestaudio";
 
     if (ONLY_VIDEO)
         return vExactPref + "/" + vExactAny + "/" + vLtePref + "/" + vLteAny + "/bestvideo";
@@ -535,15 +565,10 @@ string buildFormat() {
 // ========== NETWORK ERROR DETECTION ==========
 bool isNetworkError(const string& line) {
     static const char* patterns[] = {
-        "Failed to resolve",
-        "getaddrinfo failed",
-        "Errno 11001",
-        "WinError 10054",
-        "WinError 10060",
-        "WinError 10061",
-        "Network is unreachable"
+        "Failed to resolve", "getaddrinfo failed", "Errno 11001",
+        "WinError 10054", "WinError 10060", "WinError 10061", "Network is unreachable"
     };
-    for (auto p : patterns) {
+    for (const char* p : patterns) {
         if (line.find(p) != string::npos) return true;
     }
     return false;
@@ -551,15 +576,9 @@ bool isNetworkError(const string& line) {
 
 // ========== CHECK INTERNET ==========
 bool checkInternet() {
-    string cmd = "curl -s -o nul --connect-timeout 10 https://youtube.com";
-    if (system(cmd.c_str()) == 0) return true;
-
-    cmd = "ping -n 1 8.8.8.8 > nul 2>&1";
-    if (system(cmd.c_str()) == 0) return true;
-
-    cmd = "ping -n 1 www.youtube.com > nul 2>&1";
-    if (system(cmd.c_str()) == 0) return true;
-
+    if (system("curl -s -o nul --connect-timeout 5 https://youtube.com") == 0) return true;
+    if (system("ping -n 1 8.8.8.8 > nul 2>&1") == 0) return true;
+    if (system("ping -n 1 www.youtube.com > nul 2>&1") == 0) return true;
     return false;
 }
 
@@ -584,12 +603,10 @@ bool waitForInternetAndRetry(FILE* pipe, const string& bat, const string& cmd) {
 
 // ========== DOWNLOAD ==========
 bool execWithProgress(const string& cmd) {
-    string bat = CONFIG_PATH + "run.bat";  // Изменено: теперь в configs
+    string bat = CONFIG_PATH + "run.bat";
     ofstream f(bat);
     if (!f.is_open()) return false;
-    f << "@echo off\n";
-    f << "chcp 65001 > nul\n";
-    f << cmd << " 2>&1\n";
+    f << "@echo off\nchcp 65001 > nul\n" << cmd << " 2>&1\n";
     f.close();
 
     wstring wbat = L"\"" + utf8ToWstring(bat) + L"\"";
@@ -891,7 +908,9 @@ bool execWithProgress(const string& cmd) {
 }
 
 string buildCommand(const string& url, const string& start, const string& end, bool isPlaylist) {
-    string cmd = "yt-dlp";
+    string cmd;
+    cmd.reserve(512);
+    cmd = "yt-dlp";
 
     string cookiesPath = CONFIG_PATH + COOKIES_FILE;
     if (USE_COOKIES && fileExists(cookiesPath))
@@ -904,13 +923,13 @@ string buildCommand(const string& url, const string& start, const string& end, b
     string fmt = buildFormat();
     cmd += " -f \"" + fmt + "\"";
 
-    // Защита от rate-limit только для плейлистов
+    // Rate-limit protection only for playlists
     if (isPlaylist) {
         cmd += " --sleep-requests 1";
         cmd += " --sleep-interval 2 --max-sleep-interval 5";
     }
 
-    // Правильный способ указать QuickJS — quickjs:полный_путь_к_qjs.exe
+    // QuickJS: quickjs:full_path_to_qjs.exe
     if (QJS_FOUND && fileExists(CONFIG_PATH + "qjs.exe")) {
         cmd += " --js-runtimes quickjs:\"" + CONFIG_PATH + "qjs.exe\"";
     }
