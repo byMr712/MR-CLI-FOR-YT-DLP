@@ -981,7 +981,7 @@ wstring buildCommand(const string& url, const string& start, const string& end, 
     // Pass FFmpeg location if available
     if (FFMPEG_FOUND && !FFMPEG_PATH.empty()) {
         size_t pos = FFMPEG_PATH.find_last_of("\\/");
-        string ffmpegDir = (pos != string::npos) ? FFMPEG_PATH.substr(0, pos + 1) : FFMPEG_PATH;
+        string ffmpegDir = (pos != string::npos) ? FFMPEG_PATH.substr(0, pos) : FFMPEG_PATH;
         cmd += L" --ffmpeg-location \"" + utf8ToWstring(ffmpegDir) + L"\"";
     }
 
@@ -992,7 +992,7 @@ wstring buildCommand(const string& url, const string& start, const string& end, 
 
     // QuickJS JavaScript runtime for modern YouTube challenge solving
     if (QJS_FOUND && !QJS_PATH.empty() && fileExists(QJS_PATH)) {
-        cmd += L" --js-runtimes quickjs:\"" + utf8ToWstring(QJS_PATH) + L"\"";
+        cmd += L" --js-runtimes \"quickjs:" + utf8ToWstring(QJS_PATH) + L"\"";
     }
 
     // Codec Recompiler (Re-encode to H.264 MP4 for maximum compatibility)
