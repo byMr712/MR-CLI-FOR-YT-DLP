@@ -1,107 +1,110 @@
 # MR CLI FOR YT DLP
-**MR CLI FOR YT DLP** is a command-line interface wrapper for original yt-dlp.
+
+> **Язык:** Русский · [English](README.en.md)
+
+**MR CLI FOR YT DLP** — это интерфейс командной строки (обёртка) для оригинального yt-dlp.
 
 [![Version](https://img.shields.io/badge/version-1.09-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
 
-## 🎯 Program Features
-- Download individual videos and entire playlists
-- Select start and end items for playlist downloads
-- Resume interrupted playlist downloads
-- Configure download parameters (location, resolution, frame rate, codec)
-- Automatic format selection if the video does not match your settings
-- Video transcoding (codec recompiler) – planned for the future.
+## 🎯 Возможности программы
+- Скачивание отдельных видео и целых плейлистов
+- Выбор начального и конечного элементов для скачивания плейлистов
+- Возобновление прерванных загрузок плейлистов
+- Настройка параметров загрузки (расположение, разрешение, частота кадров, кодек)
+- Автоматический подбор формата, если видео не соответствует вашим настройкам
+- Перекодирование видео (перекомпиляция кодека) — планируется в будущем.
 
-## 📋 Prerequisites
-- Windows 10/11 (The versions below—please test them)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) in PATH (auto-installed if missing)
-- [FFmpeg](https://ffmpeg.org/) in PATH (auto-installed if missing)
+## 📋 Системные требования
+- Windows 10/11 (более ранние версии — протестируйте самостоятельно)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) в PATH (устанавливается автоматически, если отсутствует)
+- [FFmpeg](https://ffmpeg.org/) в PATH (устанавливается автоматически, если отсутствует)
 
-## 📥 Installation
-1. Download the latest release
-2. Run `MR-CLI-FOR-YT-DLP.exe`
-3. The program will automatically check and install required dependencies
+## 📥 Установка
+1. Скачайте последний релиз
+2. Запустите `MR-CLI-FOR-YT-DLP.exe`
+3. Программа автоматически проверит и установит необходимые зависимости
 
-## 🎬 Download Process
-1. Enter the video or playlist URL
-2. For playlists, specify start/end indices (optional)
-3. Watch real-time download progress
-4. File saved to your specified location
-- (default: \Documents\MR-CLI-FOR-YT-DLP\)
+## 🎬 Процесс загрузки
+1. Введите URL видео или плейлиста
+2. Для плейлистов укажите начальный/конечный индексы (необязательно)
+3. Следите за ходом загрузки в реальном времени
+4. Файл сохраняется в указанное вами место
+- (по умолчанию: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## 🎵 Download Only Audio
-1. Settings > Only audio: [ON]
-2. Start download > [video URL]
-3. Result: "Video Title [only audio].m4a"
-4. File saved to your specified location
-- (default: \Documents\MR-CLI-FOR-YT-DLP\)
+## 🎵 Скачать только аудио
+1. Настройки > Только аудио: [ВКЛ]
+2. Начать загрузку > [URL видео]
+3. Результат: «Название видео [только аудио].m4a»
+4. Файл сохраняется в указанное вами место
+- (по умолчанию: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## 🎦 Download Video Audio
-1. Settings > Only video: [ON]
-2. Start download > [video URL]
-3. Result: "Video Title [only video].mp4"
-4. File saved to your specified location
-- (default: \Documents\MR-CLI-FOR-YT-DLP\)
+## 🎦 Скачать только видео
+1. Настройки > Только видео: [ВКЛ]
+2. Начать загрузку > [URL видео]
+3. Результат: «Название видео [только видео].mp4»
+4. Файл сохраняется в указанное вами место
+- (по умолчанию: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## ⚙️ Settings Menu
-1. Download location: [C:\Users\USER\Documents\MR-CLI-FOR-YT-DLP]
-2. Video quality: [1080p 60fps MP4(H.264)]
-3. Audio quality: [M4A(AAC)]
-4. Codec recompiler: [OFF]
-5. Only audio: [OFF]
-6. Only video: [OFF]
-7. Update cookies
-0. Exit
+## ⚙️ Меню настроек
+1. Папка загрузки: [C:\Users\USER\Documents\MR-CLI-FOR-YT-DLP]
+2. Качество видео: [1080p 60fps MP4(H.264)]
+3. Качество аудио: [M4A(AAC)]
+4. Перекомпилятор кодека: [ВЫКЛ]
+5. Только аудио: [ВЫКЛ]
+6. Только видео: [ВЫКЛ]
+7. Обновить куки
+0. Выход
 
-## 🎨 Quality Settings
-- **Video resolution**: 2160p (4K), 1440p (2K), 1080p (FullHD), 720p (HD), 480p, 360p
-- **Frame rate**: 60fps or 30fps
-- **Video formats**: MP4(AV1), MP4(H.264), WEBM(AV1), WEBM(VP9)
-- **Audio formats**: M4A(AAC), WEBM(Opus), WEBM(Vorbis)
+## 🎨 Настройки качества
+- **Разрешение видео**: 2160p (4K), 1440p (2K), 1080p (FullHD), 720p (HD), 480p, 360p
+- **Частота кадров**: 60fps или 30fps
+- **Видеоформаты**: MP4(AV1), MP4(H.264), WEBM(AV1), WEBM(VP9)
+- **Аудиоформаты**: M4A(AAC), WEBM(Opus), WEBM(Vorbis)
 
-> **Note**: For 4K (2160p) and 2K (1440p) resolutions, YouTube typically provides only AV1 and VP9 codecs in WEBM container. MP4(H.264) is not available for these resolutions. The program automatically handles this and selects the best available codec for your chosen resolution.
+> **Примечание**: Для разрешений 4K (2160p) и 2K (1440p) YouTube обычно предоставляет только кодеки AV1 и VP9 в контейнере WEBM. Формат MP4(H.264) для этих разрешений недоступен. Программа обрабатывает это автоматически и подбирает наилучший доступный кодек для выбранного вами разрешения.
 
-## 🖥️ User Interface
-- Color-coded console output for better readability
-- Real-time download progress bar with speed and ETA
-- Interactive menu with keyboard navigation (no Enter key needed)
-- Persistent settings saved in `mr-config.txt`
+## 🖥️ Пользовательский интерфейс
+- Цветовая кодировка вывода в консоли для лучшей читаемости
+- Индикатор хода загрузки в реальном времени со скоростью и оставшимся временем
+- Интерактивное меню с навигацией с клавиатуры (клавиша Enter не требуется)
+- Постоянные настройки сохраняются в `mr-config.txt`
 
-## 🍪 Cookie Management
-The built-in cookie editor helps you access restricted content:
-- Select a cookie file (.txt)
-- Paste from clipboard
-- Automatic Netscape format validation
+## 🍪 Управление куки
+Встроенный редактор куки помогает получить доступ к ограниченному контенту:
+- Выбор файла куки (.txt)
+- Вставка из буфера обмена
+- Автоматическая проверка формата Netscape
 
-> **Note**: Currently, the program stores your cookies without encryption.
+> **Примечание**: В настоящее время программа хранит ваши куки без шифрования.
 
-## 🔗 Supported URLs
-- Single videos: `https://youtube.com/watch?v=...`
-- Playlists: `https://youtube.com/playlist?list=...`
-- Short links: `https://youtu.be/...`
+## 🔗 Поддерживаемые URL
+- Одиночные видео: `https://youtube.com/watch?v=...`
+- Плейлисты: `https://youtube.com/playlist?list=...`
+- Короткие ссылки: `https://youtu.be/...`
 
-## 🛠️ Building from Source
-### Requirements
-- Visual Studio 2019 or later
+## 🛠️ Сборка из исходников
+### Требования
+- Visual Studio 2019 или новее
 - Windows SDK
 
-### Compilation
-- Download "Source code.zip" in [release page](https://github.com/byMr712/MR-CLI-FOR-YT-DLP/releases)
-- Open file **mr-cli-yt-dlp.sln** in Visual Studio.
-- Press **Ctrl+Shift+B** to build the EXE file.
+### Компиляция
+- Скачайте «Source code.zip» на [странице релизов](https://github.com/byMr712/MR-CLI-FOR-YT-DLP/releases)
+- Откройте файл **mr-cli-yt-dlp.sln** в Visual Studio.
+- Нажмите **Ctrl+Shift+B** для сборки EXE-файла.
 
-## 🤝 Contributing
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+## 🤝 Вклад в проект
+1. Сделайте форк репозитория
+2. Создайте свою ветку с функцией
+3. Зафиксируйте изменения (commit)
+4. Отправьте изменения в ветку (push)
+5. Создайте Pull Request
 
-## 📄 License
-1. MIT License – feel free to use and modify!
+## 📄 Лицензия
+1. Лицензия MIT — пользуйтесь и изменяйте свободно!
 
-## 🙏 Acknowledgments
-1. [yt-dlp](https://github.com/yt-dlp/yt-dlp) – The backbone of this tool
-2. [FFmpeg](https://ffmpeg.org/) – For media processing
+## 🙏 Благодарности
+1. [yt-dlp](https://github.com/yt-dlp/yt-dlp) — основа этого инструмента
+2. [FFmpeg](https://ffmpeg.org/) — для обработки медиа
