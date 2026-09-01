@@ -6,23 +6,26 @@
 #include <fstream>
 #include <vector>
 #include <sstream>
-#include <direct.h>
-#include <sys/stat.h>
 #include <algorithm>
 #include <shlobj.h>
 #include <commdlg.h>
 #include <locale>
 #include <cctype>
-#include <io.h>
-#include <fcntl.h>
+#include <filesystem>
+#include <wininet.h>
+#include <winhttp.h>
+#include <wincrypt.h>
 
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "OleAut32.lib")
 #pragma comment(lib, "Comdlg32.lib")
-#pragma comment(lib, "Advapi32.lib")
-#pragma comment(lib, "User32.lib")
+#pragma comment(lib, "Wininet.lib")
+#pragma comment(lib, "Winhttp.lib")
+#pragma comment(lib, "Crypt32.lib")
 
 using namespace std;
+namespace fs = std::filesystem;
 
 // ========== CONFIG & CONSTANTS ==========
 enum ErrorType {
@@ -94,11 +97,26 @@ void setUTF8() {
         dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(hOut, dwMode);
     }
-    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.09");
+    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.1.0");
 }
 
 void clearScreen() {
-    system("cls");
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == INVALID_HANDLE_VALUE) {
+        cout << "\033[2J\033[H" << flush;
+        return;
+    }
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (!GetConsoleScreenBufferInfo(hOut, &csbi)) {
+        cout << "\033[2J\033[H" << flush;
+        return;
+    }
+    DWORD cellCount = csbi.dwSize.X * csbi.dwSize.Y;
+    DWORD count = 0;
+    COORD homeCoords = { 0, 0 };
+    FillConsoleOutputCharacterW(hOut, (WCHAR)' ', cellCount, homeCoords, &count);
+    FillConsoleOutputAttribute(hOut, csbi.wAttributes, cellCount, homeCoords, &count);
+    SetConsoleCursorPosition(hOut, homeCoords);
 }
 
 void waitForKey() {
@@ -120,198 +138,335 @@ char getMenuChoice() {
     return c;
 }
 
-// ========== CLIPBOARD ==========
+// ========== CLIPBOARD (DYNAMIC RUNTIME RESOLUTION) ==========
 string getClipboard() {
-    if (!OpenClipboard(NULL)) return "";
-    HANDLE h = GetClipboardData(CF_UNICODETEXT);
-    if (!h) {
-        CloseClipboard();
+    typedef BOOL(WINAPI* pfnOpenClipboard)(HWND);
+    typedef HANDLE(WINAPI* pfnGetClipboardData)(UINT);
+    typedef BOOL(WINAPI* pfnCloseClipboard)(void);
+
+    HMODULE hUser = LoadLibraryW(L"user32.dll");
+    if (!hUser) return "";
+
+    pfnOpenClipboard fnOpen = (pfnOpenClipboard)GetProcAddress(hUser, "OpenClipboard");
+    pfnGetClipboardData fnGet = (pfnGetClipboardData)GetProcAddress(hUser, "GetClipboardData");
+    pfnCloseClipboard fnClose = (pfnCloseClipboard)GetProcAddress(hUser, "CloseClipboard");
+
+    if (!fnOpen || !fnGet || !fnClose) {
+        FreeLibrary(hUser);
         return "";
     }
+
+    if (!fnOpen(NULL)) {
+        FreeLibrary(hUser);
+        return "";
+    }
+
+    HANDLE h = fnGet(CF_UNICODETEXT);
+    if (!h) {
+        fnClose();
+        FreeLibrary(hUser);
+        return "";
+    }
+
     wchar_t* t = (wchar_t*)GlobalLock(h);
     if (!t) {
-        CloseClipboard();
+        fnClose();
+        FreeLibrary(hUser);
         return "";
     }
+
     wstring r(t);
     GlobalUnlock(h);
-    CloseClipboard();
+    fnClose();
+    FreeLibrary(hUser);
     return wstringToUtf8(r);
 }
 
-// ========== KEYBOARD INPUT (WITH ESC & CTRL+V SUPPORT) ==========
+// ========== KEYBOARD INPUT (WITH NATIVE EDITING & 0 TO RETURN) ==========
 bool inputLineWithEscape(string& result, const string& prompt) {
     if (!prompt.empty()) cout << prompt;
     result.clear();
 
-    while (true) {
-        int ch = _getch();
-        if (ch == 27) { // ESC key
-            result.clear();
-            cout << endl;
-            return false;
-        }
-        if (ch == '\r') { // Enter key
-            cout << endl;
-            return true;
-        }
-        if (ch == 22) { // Ctrl+V (Paste from Clipboard)
-            string clip = getClipboard();
-            // Filter out newlines and carriage returns
-            for (char c : clip) {
-                if (c != '\r' && c != '\n') {
-                    result += c;
-                    cout << c;
-                }
-            }
-            continue;
-        }
-        if (ch == '\b' || ch == 127) { // Backspace
-            if (!result.empty()) {
-                // If it's a UTF-8 trailing byte, remove entire UTF-8 code point
-                while (!result.empty() && ((unsigned char)result.back() >= 0x80 && (unsigned char)result.back() <= 0xBF)) {
-                    result.pop_back();
-                }
-                if (!result.empty()) {
-                    result.pop_back();
-                }
-                cout << "\b \b";
-            }
-            continue;
-        }
-        if (ch == 0 || ch == 224) { // Extended keys (arrows, function keys)
-            (void)_getch(); // consume second byte
-            continue;
-        }
-        if ((unsigned char)ch >= 32) { // Printable characters (ASCII & UTF-8 bytes)
-            result += (char)ch;
-            cout << (char)ch;
-        }
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD prevMode = 0;
+    GetConsoleMode(hIn, &prevMode);
+    SetConsoleMode(hIn, prevMode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE);
+
+    wchar_t wbuf[4096];
+    DWORD readChars = 0;
+    if (!ReadConsoleW(hIn, wbuf, 4095, &readChars, NULL)) {
+        return false;
     }
+
+    while (readChars > 0 && (wbuf[readChars - 1] == L'\r' || wbuf[readChars - 1] == L'\n')) {
+        readChars--;
+    }
+    wbuf[readChars] = L'\0';
+
+    wstring ws(wbuf, readChars);
+    result = wstringToUtf8(ws);
+
+    if (result == "0") {
+        return false;
+    }
+    return true;
 }
 
 // ========== FILE & DIRECTORY HELPERS ==========
 bool fileExists(const string& p) {
     if (p.empty()) return false;
-    wstring wp = utf8ToWstring(p);
-    DWORD a = GetFileAttributesW(wp.c_str());
-    return (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY));
+    std::error_code ec;
+    return fs::is_regular_file(fs::u8path(p), ec);
 }
 
 bool dirExists(const string& p) {
     if (p.empty()) return false;
-    wstring wp = utf8ToWstring(p);
-    DWORD a = GetFileAttributesW(wp.c_str());
-    return (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY));
+    std::error_code ec;
+    return fs::is_directory(fs::u8path(p), ec);
 }
 
 bool createDirRecursive(const string& p) {
     if (p.empty()) return false;
-    wstring wp = utf8ToWstring(p);
-    int res = SHCreateDirectoryExW(NULL, wp.c_str(), NULL);
-    return (res == ERROR_SUCCESS || res == ERROR_ALREADY_EXISTS || res == ERROR_FILE_EXISTS);
+    std::error_code ec;
+    return fs::create_directories(fs::u8path(p), ec) || dirExists(p);
 }
 
-string getEnv(const string& n) {
-    wstring wn = utf8ToWstring(n);
-    wchar_t* b = nullptr;
-    size_t s = 0;
-    if (_wdupenv_s(&b, &s, wn.c_str()) != 0 || !b) return "";
-    wstring r(b);
-    free(b);
-    return wstringToUtf8(r);
-}
+int runProcessWait(const wstring& cmdLine) {
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
 
-bool inPath(const string& f, string& full) {
-    wstring wf = utf8ToWstring(f);
-    string pathStr = getEnv("PATH");
-    wstringstream ss(utf8ToWstring(pathStr));
-    wstring p;
-    while (getline(ss, p, L';')) {
-        if (p.empty()) continue;
-        while (!p.empty() && (p.back() == L'\\' || p.back() == L'/')) p.pop_back();
-        wstring testPath = p + L"\\" + wf;
-        DWORD a = GetFileAttributesW(testPath.c_str());
-        if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) {
-            full = wstringToUtf8(testPath);
-            return true;
-        }
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    wstring mutableCmd = cmdLine;
+    if (!CreateProcessW(NULL, &mutableCmd[0], NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        return -1;
     }
-    return false;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return (int)exitCode;
 }
 
 int execCmd(const string& cmd) {
-    wstring wcmd = utf8ToWstring(cmd);
-    return _wsystem(wcmd.c_str());
-}
-
-string psEscape(const string& s) {
-    string r = s;
-    size_t p = 0;
-    while ((p = r.find("'", p)) != string::npos) {
-        r.replace(p, 1, "''");
-        p += 2;
-    }
-    return r;
-}
-
-void addToPath(const string& dir) {
-    if (dir.empty()) return;
-    // 1. Update PATH in current process
-    string currentPath = getEnv("PATH");
-    if (currentPath.find(dir) == string::npos) {
-        string newPath = dir + ";" + currentPath;
-        SetEnvironmentVariableW(L"PATH", utf8ToWstring(newPath).c_str());
-    }
-
-    // 2. Update HKCU\Environment registry permanently without slow PowerShell
-    wstring wdir = utf8ToWstring(dir);
-    while (!wdir.empty() && (wdir.back() == L'\\' || wdir.back() == L'/')) wdir.pop_back();
-
-    HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Environment", 0, KEY_READ | KEY_WRITE, &hKey) == ERROR_SUCCESS) {
-        DWORD type = 0;
-        DWORD size = 0;
-        if (RegQueryValueExW(hKey, L"Path", NULL, &type, NULL, &size) == ERROR_SUCCESS) {
-            vector<wchar_t> buffer(size / sizeof(wchar_t) + 2, 0);
-            if (RegQueryValueExW(hKey, L"Path", NULL, &type, (LPBYTE)buffer.data(), &size) == ERROR_SUCCESS) {
-                wstring userPath(buffer.data());
-                if (userPath.find(wdir) == wstring::npos) {
-                    if (!userPath.empty() && userPath.back() != L';') userPath += L';';
-                    userPath += wdir;
-                    RegSetValueExW(hKey, L"Path", 0, type, (const BYTE*)userPath.c_str(), (DWORD)((userPath.length() + 1) * sizeof(wchar_t)));
-                    DWORD_PTR result;
-                    SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment", SMTO_ABORTIFHUNG, 500, &result);
-                }
-            }
-        }
-        else {
-            RegSetValueExW(hKey, L"Path", 0, REG_EXPAND_SZ, (const BYTE*)wdir.c_str(), (DWORD)((wdir.length() + 1) * sizeof(wchar_t)));
-            DWORD_PTR result;
-            SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, (LPARAM)L"Environment", SMTO_ABORTIFHUNG, 500, &result);
-        }
-        RegCloseKey(hKey);
-    }
+    return runProcessWait(utf8ToWstring(cmd));
 }
 
 string findFileRecursive(const string& dir, const string& f) {
-    wstring wdir = utf8ToWstring(dir);
-    if (!wdir.empty() && wdir.back() != L'\\' && wdir.back() != L'/') wdir += L'\\';
-    wstring wf = utf8ToWstring(f);
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW((wdir + L"*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return "";
-    do {
-        if (wstring(fd.cFileName) == L"." || wstring(fd.cFileName) == L"..") continue;
-        wstring full = wdir + fd.cFileName;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            string r = findFileRecursive(wstringToUtf8(full + L"\\"), f);
-            if (!r.empty()) { FindClose(h); return r; }
+    if (dir.empty() || !dirExists(dir)) return "";
+    try {
+        std::error_code ec;
+        for (const auto& entry : fs::recursive_directory_iterator(fs::u8path(dir), fs::directory_options::skip_permission_denied, ec)) {
+            if (!ec && entry.is_regular_file(ec)) {
+                if (entry.path().filename().u8string() == f || entry.path().filename().string() == f) {
+                    return entry.path().u8string();
+                }
+            }
         }
-        else if (wf == fd.cFileName) { FindClose(h); return wstringToUtf8(full); }
-    } while (FindNextFileW(h, &fd) != 0);
-    FindClose(h);
+    } catch (...) {}
     return "";
+}
+
+// ========== NATIVE DOWNLOADER & ZIP EXTRACTOR ==========
+void printComponentProgress(const string& label, double percent, const string& extraInfo = "") {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    const int barWidth = 25;
+    int pos = (int)(barWidth * percent / 100.0);
+
+    string line = "\r";
+    if (!label.empty()) {
+        line += "[" + label + "] ";
+    }
+    line += "[";
+    for (int i = 0; i < barWidth; i++) {
+        line += (i < pos) ? '=' : (i == pos ? '>' : ' ');
+    }
+    line += "] ";
+
+    char pctBuf[32];
+    snprintf(pctBuf, sizeof(pctBuf), "%3.0f%%", percent);
+    line += pctBuf;
+
+    if (!extraInfo.empty()) {
+        line += " " + extraInfo;
+    }
+    line += "        ";
+    cout << line << flush;
+}
+
+bool downloadFile(const string& url, const string& destFile, const string& label = "") {
+    HINTERNET hInternet = InternetOpenW(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) MR-CLI/1.1", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) return false;
+
+    DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_SECURE;
+    wstring wUrl = utf8ToWstring(url);
+    HINTERNET hUrl = InternetOpenUrlW(hInternet, wUrl.c_str(), NULL, 0, flags, 0);
+    if (!hUrl) {
+        InternetCloseHandle(hInternet);
+        return false;
+    }
+
+    // Query Content-Length
+    DWORD contentLength = 0;
+    DWORD clLen = sizeof(contentLength);
+    DWORD index = 0;
+    HttpQueryInfoW(hUrl, HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER, &contentLength, &clLen, &index);
+
+    ofstream outFile(fs::u8path(destFile), ios::binary);
+    if (!outFile.is_open()) {
+        InternetCloseHandle(hUrl);
+        InternetCloseHandle(hInternet);
+        return false;
+    }
+
+    DWORD bytesRead = 0;
+    DWORD totalDownloaded = 0;
+    char buffer[65536];
+
+    while (InternetReadFile(hUrl, buffer, sizeof(buffer), &bytesRead) && bytesRead > 0) {
+        outFile.write(buffer, bytesRead);
+        totalDownloaded += bytesRead;
+        if (contentLength > 0) {
+            double pct = ((double)totalDownloaded / (double)contentLength) * 100.0;
+            double curMB = (double)totalDownloaded / (1024.0 * 1024.0);
+            double totMB = (double)contentLength / (1024.0 * 1024.0);
+            char info[64];
+            snprintf(info, sizeof(info), "(%.1f / %.1f MB)", curMB, totMB);
+            printComponentProgress(label, pct, info);
+        } else {
+            double curMB = (double)totalDownloaded / (1024.0 * 1024.0);
+            char info[64];
+            snprintf(info, sizeof(info), "(%.1f MB)", curMB);
+            printComponentProgress(label, 0, info);
+        }
+    }
+
+    outFile.close();
+    InternetCloseHandle(hUrl);
+    InternetCloseHandle(hInternet);
+    cout << "\n";
+    return fileExists(destFile) && (totalDownloaded > 1000);
+}
+
+bool extractZip(const string& zipPath, const string& destDir) {
+    if (!fileExists(zipPath) || !dirExists(destDir)) return false;
+
+    // 1. Ultra-fast native Windows tar.exe (System32 bsdtar on Windows 10/11 - instant extraction)
+    wchar_t sysDir[MAX_PATH];
+    if (GetSystemDirectoryW(sysDir, MAX_PATH) > 0) {
+        wstring tarExe = wstring(sysDir) + L"\\tar.exe";
+        if (GetFileAttributesW(tarExe.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            wstring wDest = utf8ToWstring(destDir);
+            while (!wDest.empty() && (wDest.back() == L'\\' || wDest.back() == L'/')) wDest.pop_back();
+
+            wstring wZip = utf8ToWstring(zipPath);
+            while (!wZip.empty() && (wZip.back() == L'\\' || wZip.back() == L'/')) wZip.pop_back();
+
+            wstring cmd = L"\"" + tarExe + L"\" -xf \"" + wZip + L"\" -C \"" + wDest + L"\"";
+            if (runProcessWait(cmd) == 0) {
+                return true;
+            }
+        }
+    }
+
+    // 2. Fallback to Windows Shell COM (for older Windows versions without tar.exe)
+    IShellDispatch* pISD = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_Shell, NULL, CLSCTX_INPROC_SERVER, IID_IShellDispatch, (void**)&pISD)) || !pISD) {
+        return false;
+    }
+
+    VARIANT vZip, vDest;
+    VariantInit(&vZip);
+    VariantInit(&vDest);
+
+    fs::path absZip = fs::absolute(fs::u8path(zipPath));
+    fs::path absDest = fs::absolute(fs::u8path(destDir));
+
+    vZip.vt = VT_BSTR;
+    vZip.bstrVal = SysAllocString(absZip.wstring().c_str());
+
+    vDest.vt = VT_BSTR;
+    vDest.bstrVal = SysAllocString(absDest.wstring().c_str());
+
+    Folder* pZipFolder = nullptr;
+    Folder* pDestFolder = nullptr;
+    bool success = false;
+
+    if (SUCCEEDED(pISD->NameSpace(vZip, &pZipFolder)) && pZipFolder) {
+        if (SUCCEEDED(pISD->NameSpace(vDest, &pDestFolder)) && pDestFolder) {
+            FolderItems* pItems = nullptr;
+            if (SUCCEEDED(pZipFolder->Items(&pItems)) && pItems) {
+                VARIANT vItems, vOptions;
+                VariantInit(&vItems);
+                VariantInit(&vOptions);
+                vItems.vt = VT_DISPATCH;
+                vItems.pdispVal = pItems;
+                vOptions.vt = VT_I4;
+                vOptions.lVal = 4 | 16 | 512 | 1024; // FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI
+
+                HRESULT hr = pDestFolder->CopyHere(vItems, vOptions);
+                success = SUCCEEDED(hr);
+                pItems->Release();
+            }
+            pDestFolder->Release();
+        }
+        pZipFolder->Release();
+    }
+
+    VariantClear(&vZip);
+    VariantClear(&vDest);
+    pISD->Release();
+    return success;
+}
+
+void organizeExtractedTool(const string& targetExe, const string& destDir) {
+    std::error_code ec;
+    fs::path targetDir = fs::weakly_canonical(fs::u8path(destDir), ec);
+    if (ec || targetDir.empty()) {
+        targetDir = fs::u8path(destDir);
+        while (targetDir.has_filename() && targetDir.filename().empty()) {
+            targetDir = targetDir.parent_path();
+        }
+    }
+
+    // 1. Search for targetExe in subdirectories of targetDir
+    fs::path foundExePath;
+    for (const auto& entry : fs::recursive_directory_iterator(targetDir, fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && entry.is_regular_file(ec)) {
+            if (entry.path().filename().u8string() == targetExe || entry.path().filename().string() == targetExe) {
+                // If it is in a subdirectory (not directly in targetDir), this is our extracted tool
+                if (entry.path().parent_path() != targetDir) {
+                    foundExePath = entry.path();
+                    break;
+                }
+            }
+        }
+    }
+
+    if (foundExePath.empty()) {
+        return;
+    }
+
+    fs::path binDir = foundExePath.parent_path();
+
+    // 2. Copy all .exe / tool files from binDir into targetDir
+    for (const auto& entry : fs::directory_iterator(binDir, ec)) {
+        if (!ec && entry.is_regular_file(ec)) {
+            fs::copy_file(entry.path(), targetDir / entry.path().filename(), fs::copy_options::overwrite_existing, ec);
+        }
+    }
+
+    // 3. Delete any extracted subdirectories inside targetDir
+    for (const auto& entry : fs::directory_iterator(targetDir, ec)) {
+        if (!ec && entry.is_directory(ec)) {
+            fs::remove_all(entry.path(), ec);
+        }
+    }
 }
 
 // ========== PROGRESS PARSER & BAR ==========
@@ -458,7 +613,55 @@ string openFileDialog() {
     return "";
 }
 
-// ========== COOKIES ==========
+// ========== ENCRYPTED COOKIES (WINDOWS DPAPI) ==========
+static string g_tempCookiesPath = "";
+
+void cleanupTempCookiesFile() {
+    if (!g_tempCookiesPath.empty() && fileExists(g_tempCookiesPath)) {
+        // Secure wipe: overwrite with zeros before deleting
+        ofstream f(fs::u8path(g_tempCookiesPath), ios::in | ios::out | ios::binary);
+        if (f.is_open()) {
+            f.seekp(0, ios::end);
+            size_t sz = (size_t)f.tellp();
+            f.seekp(0, ios::beg);
+            vector<char> zeros(sz, 0);
+            f.write(zeros.data(), sz);
+            f.close();
+        }
+        std::error_code ec;
+        fs::remove(fs::u8path(g_tempCookiesPath), ec);
+        g_tempCookiesPath.clear();
+    }
+}
+
+bool encryptData(const string& plaintext, vector<BYTE>& encryptedData) {
+    if (plaintext.empty()) return false;
+    DATA_BLOB inBlob;
+    inBlob.pbData = (BYTE*)plaintext.data();
+    inBlob.cbData = (DWORD)plaintext.size();
+    DATA_BLOB outBlob;
+    if (CryptProtectData(&inBlob, L"MR_CLI_COOKIES", NULL, NULL, NULL, 0, &outBlob)) {
+        encryptedData.assign(outBlob.pbData, outBlob.pbData + outBlob.cbData);
+        LocalFree(outBlob.pbData);
+        return true;
+    }
+    return false;
+}
+
+bool decryptData(const vector<BYTE>& encryptedData, string& plaintext) {
+    if (encryptedData.empty()) return false;
+    DATA_BLOB inBlob;
+    inBlob.pbData = (BYTE*)encryptedData.data();
+    inBlob.cbData = (DWORD)encryptedData.size();
+    DATA_BLOB outBlob;
+    if (CryptUnprotectData(&inBlob, NULL, NULL, NULL, NULL, 0, &outBlob)) {
+        plaintext.assign((char*)outBlob.pbData, outBlob.cbData);
+        LocalFree(outBlob.pbData);
+        return true;
+    }
+    return false;
+}
+
 bool validateCookiesContent(const string& c) {
     if (c.find("# Netscape HTTP Cookie File") != string::npos) return true;
     stringstream ss(c); string l;
@@ -467,33 +670,101 @@ bool validateCookiesContent(const string& c) {
         int tabs = 0; for (char ch : l) if (ch == '\t') tabs++;
         if (tabs >= 5) return true;
     }
-    // Also accept JSON cookies format
     if (c.find("\"domain\":") != string::npos && c.find("\"name\":") != string::npos) return true;
     return false;
 }
 
 bool validateCookies(const string& p) {
-    ifstream f(p); if (!f.is_open()) return false;
+    ifstream f(fs::u8path(p), ios::binary); if (!f.is_open()) return false;
     string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
     f.close(); return validateCookiesContent(c);
 }
 
 bool saveCookies(const string& c) {
-    string cookiesPath = CONFIG_PATH + COOKIES_FILE;
-    ofstream f(cookiesPath, ios::out | ios::binary); if (!f.is_open()) return false;
-    if (c.find("# Netscape HTTP Cookie File") == string::npos && c.find("[") != 0) {
-        f << "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.09\n\n";
+    string fullCookies = c;
+    if (fullCookies.find("# Netscape HTTP Cookie File") == string::npos && fullCookies.find("[") != 0) {
+        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.0\n\n" + fullCookies;
     }
-    f << c; f.close(); return true;
+    vector<BYTE> enc;
+    if (encryptData(fullCookies, enc)) {
+        string encPath = CONFIG_PATH + "cookies.dat";
+        ofstream f(fs::u8path(encPath), ios::binary);
+        if (f.is_open()) {
+            f.write((char*)enc.data(), enc.size());
+            f.close();
+            // Securely remove plain cookies.txt if it was there
+            string txtPath = CONFIG_PATH + "cookies.txt";
+            if (fileExists(txtPath)) {
+                std::error_code ec;
+                fs::remove(fs::u8path(txtPath), ec);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
+string getDecryptedCookies() {
+    string encPath = CONFIG_PATH + "cookies.dat";
+    if (fileExists(encPath)) {
+        ifstream f(fs::u8path(encPath), ios::binary);
+        if (f.is_open()) {
+            vector<BYTE> enc((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
+            f.close();
+            string plain;
+            if (decryptData(enc, plain)) {
+                return plain;
+            }
+        }
+    }
+    // Auto-migration from legacy cookies.txt
+    string txtPath = CONFIG_PATH + "cookies.txt";
+    if (fileExists(txtPath)) {
+        ifstream f(fs::u8path(txtPath), ios::binary);
+        if (f.is_open()) {
+            string plain((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
+            f.close();
+            saveCookies(plain);
+            return plain;
+        }
+    }
+    return "";
+}
+
+bool hasSavedCookies() {
+    return fileExists(CONFIG_PATH + "cookies.dat") || fileExists(CONFIG_PATH + "cookies.txt");
+}
+
+string prepareTempCookiesFile() {
+    cleanupTempCookiesFile();
+    string plain = getDecryptedCookies();
+    if (plain.empty()) return "";
+
+    wchar_t tempDir[MAX_PATH];
+    if (GetTempPathW(MAX_PATH, tempDir) == 0) return "";
+
+    wstring tempFile = wstring(tempDir) + L".mr_yt_cookies_" + to_wstring(GetCurrentProcessId()) + L".tmp";
+    string u8TempFile = wstringToUtf8(tempFile);
+
+    ofstream f(fs::u8path(u8TempFile), ios::binary);
+    if (!f.is_open()) return "";
+    f.write(plain.data(), plain.size());
+    f.close();
+
+    SetFileAttributesW(tempFile.c_str(), FILE_ATTRIBUTE_TEMPORARY);
+    g_tempCookiesPath = u8TempFile;
+    return u8TempFile;
 }
 
 // ========== MENUS ==========
 string cookieEditor(bool fromSettings = false) {
     while (true) {
+        clearScreen();
         printColor("========================================", CYAN);
-        printColor(" COOKIE EDITOR", CYAN);
+        printColor(" COOKIE EDITOR (ENCRYPTED STORAGE)", CYAN);
         printColor("========================================", CYAN);
-        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n0. Exit to main menu\n\nYour choice: ";
+        cout << "\nStatus: " << (hasSavedCookies() ? "[PROTECTED / ENCRYPTED]" : "[NOT CONFIGURED]") << "\n";
+        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n3. Edit in Notepad (Temporary decrypted)\n4. Delete saved cookies\n0. Exit to main menu\n\nYour choice: ";
         char ch = getMenuChoice();
         if (ch == 27) {
             cout << "ESC" << endl;
@@ -509,13 +780,13 @@ string cookieEditor(bool fromSettings = false) {
                 break;
             }
             if (validateCookies(p)) {
-                ifstream f(p, ios::binary);
+                ifstream f(fs::u8path(p), ios::binary);
                 string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
                 f.close();
                 if (saveCookies(c)) {
                     USE_COOKIES = true;
                     saveConfig();
-                    printColor("[OK] Cookies updated successfully!", GREEN);
+                    printColor("[OK] Cookies encrypted and saved securely!", GREEN);
                     waitForKey();
                     return fromSettings ? "settings" : "continue";
                 }
@@ -536,11 +807,52 @@ string cookieEditor(bool fromSettings = false) {
             if (validateCookiesContent(c) && saveCookies(c)) {
                 USE_COOKIES = true;
                 saveConfig();
-                printColor("[OK] Cookies pasted and saved successfully!", GREEN);
+                printColor("[OK] Cookies encrypted and saved securely!", GREEN);
                 waitForKey();
                 return fromSettings ? "settings" : "continue";
             }
             printColor("[ERROR] Invalid cookies format in clipboard!", RED);
+            waitForKey();
+            break;
+        }
+        case '3': {
+            string plain = getDecryptedCookies();
+            if (plain.empty()) {
+                plain = "# Netscape HTTP Cookie File\n# https://curl.haxx.se/rfc/cookie_spec.html\n# Paste cookies here, save, and close Notepad\n\n";
+            }
+            string tempEdit = prepareTempCookiesFile();
+            if (tempEdit.empty()) {
+                printColor("[ERROR] Failed to prepare temporary edit file!", RED);
+                waitForKey();
+                break;
+            }
+            wstring cmd = L"notepad.exe \"" + utf8ToWstring(tempEdit) + L"\"";
+            runProcessWait(cmd);
+            if (fileExists(tempEdit) && validateCookies(tempEdit)) {
+                ifstream f(fs::u8path(tempEdit), ios::binary);
+                string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
+                f.close();
+                if (saveCookies(c)) {
+                    USE_COOKIES = true;
+                    saveConfig();
+                    printColor("[OK] Cookies updated and encrypted securely!", GREEN);
+                    cleanupTempCookiesFile();
+                    waitForKey();
+                    return fromSettings ? "settings" : "continue";
+                }
+            }
+            cleanupTempCookiesFile();
+            printColor("[INFO] No changes saved.", YELLOW);
+            waitForKey();
+            break;
+        }
+        case '4': {
+            std::error_code ec;
+            fs::remove(fs::u8path(CONFIG_PATH + "cookies.dat"), ec);
+            fs::remove(fs::u8path(CONFIG_PATH + "cookies.txt"), ec);
+            USE_COOKIES = false;
+            saveConfig();
+            printColor("[OK] Saved cookies removed!", GREEN);
             waitForKey();
             break;
         }
@@ -629,14 +941,11 @@ bool isNetworkError(const string& line) {
 
 // ========== CHECK INTERNET ==========
 bool checkInternet() {
-    // Fast socket check or lightweight ping
-    string cmd = "ping -n 1 8.8.8.8 > nul 2>&1";
-    if (system(cmd.c_str()) == 0) return true;
-
-    cmd = "curl -s -o nul --connect-timeout 5 https://www.google.com";
-    if (system(cmd.c_str()) == 0) return true;
-
-    return false;
+    DWORD flags = 0;
+    if (InternetGetConnectedState(&flags, 0)) {
+        return true;
+    }
+    return (InternetCheckConnectionW(L"https://www.google.com", FLAG_ICC_FORCE_CONNECTION, 0) == TRUE);
 }
 
 // ========== WAIT FOR INTERNET ==========
@@ -711,6 +1020,7 @@ bool execWithProgress(const wstring& cmdLine) {
     bool progressActive = false;
     bool isPlaylist = false;
     bool mergeFailed = false;
+    bool inArchive = false;
     int curItem = 0, totalItems = 0;
     string mergeErrorPath = "";
     char buffer[4096];
@@ -783,6 +1093,7 @@ bool execWithProgress(const wstring& cmdLine) {
                     else if (line.find("has already been recorded in the archive") != string::npos) {
                         if (progressActive) { cout << endl; progressActive = false; }
                         printColor("[INFO] Video already downloaded (in archive, skipping).", GREEN);
+                        inArchive = true;
                     }
                     else if (line.find("[download] Destination:") == 0) {
                         string path = line.substr(string("[download] Destination:").length());
@@ -840,6 +1151,10 @@ bool execWithProgress(const wstring& cmdLine) {
                         printColor("\n[RATE LIMIT] " + line, RED);
                     }
                     else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
+                        if (line.find("[PYI-") != string::npos && inArchive) {
+                            line.clear();
+                            continue;
+                        }
                         if (progressActive) { cout << endl; progressActive = false; }
 
                         if (line.find("Sign in to confirm you're not a bot") != string::npos ||
@@ -938,10 +1253,12 @@ bool execWithProgress(const wstring& cmdLine) {
 
             if (mergeResult == 0) {
                 printColor("[OK] Manual merge successful!", GREEN);
-                remove(videoFile.c_str());
-                remove(audioFile.c_str());
+                std::error_code ec;
+                fs::remove(fs::u8path(videoFile), ec);
+                fs::remove(fs::u8path(audioFile), ec);
                 string finalFile = dir + baseName + ".mp4";
-                if (rename(outputFile.c_str(), finalFile.c_str()) != 0) {
+                fs::rename(fs::u8path(outputFile), fs::u8path(finalFile), ec);
+                if (ec) {
                     printColor("[WARNING] Merged file created as: " + outputFile, YELLOW);
                 }
                 else {
@@ -952,20 +1269,30 @@ bool execWithProgress(const wstring& cmdLine) {
         }
     }
 
-    if (totalItems > 0 && curItem >= totalItems) {
+    if (inArchive) {
+        cleanupTempCookiesFile();
+        LAST_ERROR = NOT_ERROR;
         return true;
     }
 
+    if (totalItems > 0 && curItem >= totalItems) {
+        cleanupTempCookiesFile();
+        return true;
+    }
+
+    cleanupTempCookiesFile();
     return (exitCode == 0);
 }
 
 // ========== COMMAND BUILDING ==========
 wstring buildCommand(const string& url, const string& start, const string& end, bool isPlaylist) {
-    wstring cmd = L"\"" + utf8ToWstring(YTDLP_PATH.empty() ? "yt-dlp" : YTDLP_PATH) + L"\"";
+    wstring cmd = L"\"" + utf8ToWstring(YTDLP_PATH.empty() ? (CONFIG_PATH + "yt-dlp.exe") : YTDLP_PATH) + L"\"";
 
-    string cookiesPath = CONFIG_PATH + COOKIES_FILE;
-    if (USE_COOKIES && fileExists(cookiesPath)) {
-        cmd += L" --cookies \"" + utf8ToWstring(cookiesPath) + L"\"";
+    if (USE_COOKIES && hasSavedCookies()) {
+        string tempCookiePath = prepareTempCookiesFile();
+        if (!tempCookiePath.empty()) {
+            cmd += L" --cookies \"" + utf8ToWstring(tempCookiePath) + L"\"";
+        }
     }
 
     if (!ARCHIVE_PATH.empty()) {
@@ -1372,11 +1699,17 @@ void startDownload(const string& url = "", const string& start = "", const strin
             }
         }
         else if (ch == '2') {
-            printColor("\n[INFO] Updating yt-dlp...", CYAN);
-            string updateCmd = "\"" + (YTDLP_PATH.empty() ? "yt-dlp" : YTDLP_PATH) + "\" -U";
-            execCmd(updateCmd);
-            printColor("\n[OK] Update attempt finished. Retrying download...", GREEN);
-            waitForKey();
+            printColor("\n[INFO] Downloading latest yt-dlp...", CYAN);
+            string destExe = CONFIG_PATH + "yt-dlp.exe";
+            if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", destExe, "yt-dlp")) {
+                YTDLP_FOUND = fileExists(destExe);
+                YTDLP_PATH = destExe;
+                printColor("\n[OK] yt-dlp updated successfully! Retrying download...", GREEN);
+            }
+            else {
+                printColor("\n[ERROR] Failed to update yt-dlp.", RED);
+            }
+            Sleep(1500);
             LAST_ERROR = NOT_ERROR;
             cookieErrorHandled = false;
             startDownload(u, s, e, isPl, true);
@@ -1503,11 +1836,17 @@ void updateComponentsMenu() {
     if (ch == '1') {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" Updating yt-dlp...", CYAN);
+        printColor(" Downloading latest yt-dlp (~20MB)...", CYAN);
         printColor("========================================", CYAN);
-        string updateCmd = "\"" + (YTDLP_PATH.empty() ? "yt-dlp" : YTDLP_PATH) + "\" -U";
-        execCmd(updateCmd);
-        printColor("\n[OK] Done!", GREEN);
+        string destExe = CONFIG_PATH + "yt-dlp.exe";
+        if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", destExe, "yt-dlp")) {
+            YTDLP_FOUND = fileExists(destExe);
+            YTDLP_PATH = destExe;
+            printColor("\n[OK] yt-dlp updated successfully!", GREEN);
+        }
+        else {
+            printColor("\n[ERROR] Failed to update yt-dlp!", RED);
+        }
         waitForKey();
     }
     else if (ch == '2') {
@@ -1515,25 +1854,31 @@ void updateComponentsMenu() {
         printColor("========================================", CYAN);
         printColor(" Downloading latest FFmpeg (~160MB)...", CYAN);
         printColor("========================================", CYAN);
-        string escapedConfig = psEscape(CONFIG_PATH);
-        string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "ffmpeg.zip\" \"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip\"";
-        if (execCmd(downloadCmd) == 0 && fileExists(CONFIG_PATH + "ffmpeg.zip")) {
-            string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "ffmpeg.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
-            execCmd(extractCmd);
-            string ffmpegPath = findFileRecursive(CONFIG_PATH, "ffmpeg.exe");
-            if (!ffmpegPath.empty()) {
-                size_t pos = ffmpegPath.find_last_of("\\/");
-                string ffmpegDir = ffmpegPath.substr(0, pos + 1);
-                string copyCmd = "copy /Y \"" + ffmpegDir + "*\" \"" + CONFIG_PATH + "\" > nul";
-                execCmd(copyCmd);
-                string psRemoveCmd = "powershell -Command \"Get-ChildItem -Path '" + escapedConfig + "' -Directory | Where-Object { $_.Name -like '*ffmpeg*' } | Remove-Item -Recurse -Force\"";
-                execCmd(psRemoveCmd);
-                FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
-                FFMPEG_FOUND = true;
-                addToPath(CONFIG_PATH);
-                printColor("\n[OK] FFmpeg updated successfully!", GREEN);
+        string zipFile = CONFIG_PATH + "ffmpeg.zip";
+        if (downloadFile("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", zipFile, "FFmpeg")) {
+            printComponentProgress("FFmpeg", 100.0, "Extracting components...");
+            if (extractZip(zipFile, CONFIG_PATH)) {
+                organizeExtractedTool("ffmpeg.exe", CONFIG_PATH);
+                FFMPEG_FOUND = fileExists(CONFIG_PATH + "ffmpeg.exe");
+                if (FFMPEG_FOUND) {
+                    FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+                    cout << "\n";
+                    printColor("[OK] FFmpeg updated successfully!", GREEN);
+                }
+                else {
+                    cout << "\n";
+                    printColor("[ERROR] Failed to locate ffmpeg.exe after extraction!", RED);
+                }
             }
-            remove((CONFIG_PATH + "ffmpeg.zip").c_str());
+            else {
+                cout << "\n";
+                printColor("[ERROR] Failed to extract FFmpeg archive!", RED);
+            }
+            std::error_code ec;
+            fs::remove(fs::u8path(zipFile), ec);
+        }
+        else {
+            printColor("[ERROR] Failed to download FFmpeg!", RED);
         }
         waitForKey();
     }
@@ -1542,21 +1887,31 @@ void updateComponentsMenu() {
         printColor("========================================", CYAN);
         printColor(" Downloading QuickJS (~1MB)...", CYAN);
         printColor("========================================", CYAN);
-        string escapedConfig = psEscape(CONFIG_PATH);
-        string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "quickjs.zip\" \"https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip\"";
-        if (execCmd(downloadCmd) == 0 && fileExists(CONFIG_PATH + "quickjs.zip")) {
-            string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "quickjs.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
-            execCmd(extractCmd);
-            string foundPath = findFileRecursive(CONFIG_PATH, "qjs.exe");
-            if (!foundPath.empty()) {
-                string copyCmd = "copy /Y \"" + foundPath + "\" \"" + CONFIG_PATH + "qjs.exe\" > nul";
-                execCmd(copyCmd);
-                QJS_PATH = CONFIG_PATH + "qjs.exe";
-                QJS_FOUND = true;
-                addToPath(CONFIG_PATH);
-                printColor("\n[OK] QuickJS updated successfully!", GREEN);
+        string zipFile = CONFIG_PATH + "quickjs.zip";
+        if (downloadFile("https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip", zipFile, "QuickJS")) {
+            printComponentProgress("QuickJS", 100.0, "Extracting components...");
+            if (extractZip(zipFile, CONFIG_PATH)) {
+                organizeExtractedTool("qjs.exe", CONFIG_PATH);
+                QJS_FOUND = fileExists(CONFIG_PATH + "qjs.exe");
+                if (QJS_FOUND) {
+                    QJS_PATH = CONFIG_PATH + "qjs.exe";
+                    cout << "\n";
+                    printColor("[OK] QuickJS updated successfully!", GREEN);
+                }
+                else {
+                    cout << "\n";
+                    printColor("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", YELLOW);
+                }
             }
-            remove((CONFIG_PATH + "quickjs.zip").c_str());
+            else {
+                cout << "\n";
+                printColor("[WARNING] Failed to extract QuickJS archive.", YELLOW);
+            }
+            std::error_code ec;
+            fs::remove(fs::u8path(zipFile), ec);
+        }
+        else {
+            printColor("[WARNING] Failed to download QuickJS (QuickJS is optional).", YELLOW);
         }
         waitForKey();
     }
@@ -1612,51 +1967,23 @@ void settingsMenu() {
 
 // ========== DEPENDENCY CHECKS & AUTO INSTALLER ==========
 bool checkDependencies() {
-    bool ytFound = false, ffFound = false, qjsFound = false;
+    YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
+    FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+    QJS_PATH = CONFIG_PATH + "qjs.exe";
 
-    // Check yt-dlp
-    if (fileExists(CONFIG_PATH + "yt-dlp.exe")) {
-        ytFound = true;
-        YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
-        addToPath(CONFIG_PATH);
-    }
-    else if (inPath("yt-dlp.exe", YTDLP_PATH)) {
-        ytFound = true;
-    }
+    YTDLP_FOUND = fileExists(YTDLP_PATH);
+    FFMPEG_FOUND = fileExists(FFMPEG_PATH);
+    QJS_FOUND = fileExists(QJS_PATH);
 
-    // Check ffmpeg
-    if (fileExists(CONFIG_PATH + "ffmpeg.exe")) {
-        ffFound = true;
-        FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
-        addToPath(CONFIG_PATH);
-    }
-    else if (inPath("ffmpeg.exe", FFMPEG_PATH)) {
-        ffFound = true;
-    }
-
-    // Check QuickJS (qjs.exe)
-    if (fileExists(CONFIG_PATH + "qjs.exe")) {
-        qjsFound = true;
-        QJS_PATH = CONFIG_PATH + "qjs.exe";
-        addToPath(CONFIG_PATH);
-    }
-    else if (inPath("qjs.exe", QJS_PATH)) {
-        qjsFound = true;
-    }
-
-    YTDLP_FOUND = ytFound;
-    FFMPEG_FOUND = ffFound;
-    QJS_FOUND = qjsFound;
-
-    if (!ytFound || !ffFound || !qjsFound) {
+    if (!YTDLP_FOUND || !FFMPEG_FOUND || !QJS_FOUND) {
         printColor("============================================", RED);
         printColor("[ERROR] Missing recommended components on your computer", RED);
         printColor("============================================", RED);
 
         string missing = "";
-        if (!ytFound) missing += "yt-dlp ";
-        if (!ffFound) missing += "FFmpeg ";
-        if (!qjsFound) missing += "QuickJS ";
+        if (!YTDLP_FOUND) missing += "yt-dlp ";
+        if (!FFMPEG_FOUND) missing += "FFmpeg ";
+        if (!QJS_FOUND) missing += "QuickJS ";
 
         printColor("\n============================================", CYAN);
         printColor(" AUTO INSTALLER", CYAN);
@@ -1673,7 +2000,7 @@ bool checkDependencies() {
             }
             else if (ch == 'n' || ch == 'N' || ch == 27) {
                 cout << "n" << endl;
-                if (!ytFound) {
+                if (!YTDLP_FOUND) {
                     printColor("\n============================================", YELLOW);
                     printColor(" [ERROR] yt-dlp is required to run the application!", RED);
                     printColor(" [INFO] Download from: https://github.com/yt-dlp/yt-dlp/releases", YELLOW);
@@ -1693,86 +2020,74 @@ bool checkDependencies() {
         if (!dirExists(CONFIG_PATH)) {
             createDirRecursive(CONFIG_PATH);
         }
-        string escapedConfig = psEscape(CONFIG_PATH);
 
-        if (!ytFound) {
-            printColor("\n[INFO] Downloading yt-dlp (~20MB)...", CYAN);
-            string cmd = "curl -# -L -o \"" + CONFIG_PATH + "yt-dlp.exe\" \"https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe\"";
-            if (execCmd(cmd) == 0 && fileExists(CONFIG_PATH + "yt-dlp.exe")) {
-                YTDLP_PATH = CONFIG_PATH + "yt-dlp.exe";
+        if (!YTDLP_FOUND) {
+            printColor("\n[INFO] Installing yt-dlp (~20MB)...", CYAN);
+            if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", CONFIG_PATH + "yt-dlp.exe", "yt-dlp")) {
                 YTDLP_FOUND = true;
-                addToPath(CONFIG_PATH);
-                printColor("\n[OK] yt-dlp installed successfully!", GREEN);
+                printColor("[OK] yt-dlp installed successfully!", GREEN);
             }
             else {
                 printColor("[ERROR] Failed to install yt-dlp!", RED);
             }
         }
 
-        if (!ffFound) {
-            printColor("\n[INFO] Downloading FFmpeg (~160MB)...", CYAN);
-
-            string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "ffmpeg.zip\" \"https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip\"";
-            execCmd(downloadCmd);
-
-            if (fileExists(CONFIG_PATH + "ffmpeg.zip")) {
-                string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "ffmpeg.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
-                execCmd(extractCmd);
-
-                string ffmpegPath = findFileRecursive(CONFIG_PATH, "ffmpeg.exe");
-
-                if (!ffmpegPath.empty()) {
-                    size_t pos = ffmpegPath.find_last_of("\\/");
-                    string ffmpegDir = ffmpegPath.substr(0, pos + 1);
-
-                    string copyCmd = "copy /Y \"" + ffmpegDir + "*\" \"" + CONFIG_PATH + "\" > nul";
-                    execCmd(copyCmd);
-
-                    string psRemoveCmd = "powershell -Command \"Get-ChildItem -Path '" + escapedConfig + "' -Directory | Where-Object { $_.Name -like '*ffmpeg*' } | Remove-Item -Recurse -Force\"";
-                    execCmd(psRemoveCmd);
-
-                    FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
-                    FFMPEG_FOUND = true;
-                    addToPath(CONFIG_PATH);
-                    printColor("\n[OK] FFmpeg and FFprobe installed successfully!", GREEN);
+        if (!FFMPEG_FOUND) {
+            printColor("\n[INFO] Installing FFmpeg (~160MB)...", CYAN);
+            string zipFile = CONFIG_PATH + "ffmpeg.zip";
+            if (downloadFile("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", zipFile, "FFmpeg")) {
+                printComponentProgress("FFmpeg", 100.0, "Extracting components...");
+                if (extractZip(zipFile, CONFIG_PATH)) {
+                    organizeExtractedTool("ffmpeg.exe", CONFIG_PATH);
+                    FFMPEG_FOUND = fileExists(CONFIG_PATH + "ffmpeg.exe");
+                    if (FFMPEG_FOUND) {
+                        FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+                        cout << "\n";
+                        printColor("[OK] FFmpeg and FFprobe installed successfully!", GREEN);
+                    }
+                    else {
+                        cout << "\n";
+                        printColor("[ERROR] Failed to locate ffmpeg.exe after extraction!", RED);
+                    }
                 }
                 else {
-                    printColor("[ERROR] Failed to locate ffmpeg.exe after extraction!", RED);
+                    cout << "\n";
+                    printColor("[ERROR] Failed to extract FFmpeg archive!", RED);
                 }
 
-                remove((CONFIG_PATH + "ffmpeg.zip").c_str());
+                std::error_code ec;
+                fs::remove(fs::u8path(zipFile), ec);
             }
             else {
                 printColor("[ERROR] Failed to download FFmpeg!", RED);
             }
         }
 
-        if (!qjsFound) {
-            printColor("\n[INFO] Downloading QuickJS (~1MB)...", CYAN);
-
-            string downloadCmd = "curl -# -L -o \"" + CONFIG_PATH + "quickjs.zip\" \"https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip\"";
-            execCmd(downloadCmd);
-
-            if (fileExists(CONFIG_PATH + "quickjs.zip")) {
-                string extractCmd = "powershell -Command \"Expand-Archive -Path '" + escapedConfig + "quickjs.zip' -DestinationPath '" + escapedConfig + "' -Force\"";
-                execCmd(extractCmd);
-
-                string foundPath = findFileRecursive(CONFIG_PATH, "qjs.exe");
-
-                if (!foundPath.empty()) {
-                    string copyCmd = "copy /Y \"" + foundPath + "\" \"" + CONFIG_PATH + "qjs.exe\" > nul";
-                    execCmd(copyCmd);
-
-                    QJS_PATH = CONFIG_PATH + "qjs.exe";
-                    QJS_FOUND = true;
-                    addToPath(CONFIG_PATH);
-                    printColor("\n[OK] QuickJS installed successfully!", GREEN);
+        if (!QJS_FOUND) {
+            printColor("\n[INFO] Installing QuickJS (~1MB)...", CYAN);
+            string zipFile = CONFIG_PATH + "quickjs.zip";
+            if (downloadFile("https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip", zipFile, "QuickJS")) {
+                printComponentProgress("QuickJS", 100.0, "Extracting components...");
+                if (extractZip(zipFile, CONFIG_PATH)) {
+                    organizeExtractedTool("qjs.exe", CONFIG_PATH);
+                    QJS_FOUND = fileExists(CONFIG_PATH + "qjs.exe");
+                    if (QJS_FOUND) {
+                        QJS_PATH = CONFIG_PATH + "qjs.exe";
+                        cout << "\n";
+                        printColor("[OK] QuickJS installed successfully!", GREEN);
+                    }
+                    else {
+                        cout << "\n";
+                        printColor("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", YELLOW);
+                    }
                 }
                 else {
-                    printColor("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", YELLOW);
+                    cout << "\n";
+                    printColor("[WARNING] Failed to extract QuickJS archive.", YELLOW);
                 }
 
-                remove((CONFIG_PATH + "quickjs.zip").c_str());
+                std::error_code ec;
+                fs::remove(fs::u8path(zipFile), ec);
             }
             else {
                 printColor("[WARNING] Failed to download QuickJS (QuickJS is optional).", YELLOW);
@@ -1780,15 +2095,9 @@ bool checkDependencies() {
         }
 
         // Final verification
-        if (fileExists(CONFIG_PATH + "yt-dlp.exe") || inPath("yt-dlp.exe", YTDLP_PATH)) {
-            YTDLP_FOUND = true;
-        }
-        if (fileExists(CONFIG_PATH + "ffmpeg.exe") || inPath("ffmpeg.exe", FFMPEG_PATH)) {
-            FFMPEG_FOUND = true;
-        }
-        if (fileExists(CONFIG_PATH + "qjs.exe") || inPath("qjs.exe", QJS_PATH)) {
-            QJS_FOUND = true;
-        }
+        YTDLP_FOUND = fileExists(YTDLP_PATH);
+        FFMPEG_FOUND = fileExists(FFMPEG_PATH);
+        QJS_FOUND = fileExists(QJS_PATH);
 
         if (YTDLP_FOUND) {
             printColor("\n[OK] Dependencies check completed!", GREEN);
@@ -1809,7 +2118,7 @@ bool checkDependencies() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.09", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.1.0", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP:  " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), YTDLP_FOUND ? GREEN : RED);
@@ -1820,7 +2129,9 @@ void displayMenu() {
 }
 
 int main() {
-    // Initialize COM for Windows Shell and Folder Dialogs
+    atexit(cleanupTempCookiesFile);
+
+    // Initialize COM for Windows Shell, Folder Dialogs, and Shell Zip extraction
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
     setUTF8();
@@ -1872,4 +2183,4 @@ int main() {
 
     CoUninitialize();
     return 0;
-}
+}
