@@ -105,6 +105,7 @@ The built-in cookie editor helps you access restricted content:
 ## 📄 License
 1. MIT License – feel free to use and modify!
 
-## 🙏 Acknowledgments
-1. [yt-dlp](https://github.com/yt-dlp/yt-dlp) – The backbone of this tool
-2. [FFmpeg](https://ffmpeg.org/) – For media processing
+## 🙏 Many thanks to
+1. [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+2. [FFmpeg](https://ffmpeg.org/)
+3. [QuickJS](https://github.com/bellard/quickjs)

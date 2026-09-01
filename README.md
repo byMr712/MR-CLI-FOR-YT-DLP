@@ -105,6 +105,7 @@
 ## 📄 Лицензия
 1. Лицензия MIT — пользуйтесь и изменяйте свободно!
 
-## 🙏 Благодарности
-1. [yt-dlp](https://github.com/yt-dlp/yt-dlp) — основа этого инструмента
-2. [FFmpeg](https://ffmpeg.org/) — для обработки медиа
+## 🙏 Выражаю большую благодарность
+1. [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+2. [FFmpeg](https://ffmpeg.org/)
+3. [QuickJS](https://github.com/bellard/quickjs)
