@@ -13,16 +13,13 @@
 #include <cctype>
 #include <filesystem>
 #include <wininet.h>
-#include <winhttp.h>
-#include <wincrypt.h>
 
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Ole32.lib")
 #pragma comment(lib, "OleAut32.lib")
 #pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "Wininet.lib")
-#pragma comment(lib, "Winhttp.lib")
-#pragma comment(lib, "Crypt32.lib")
+#pragma comment(lib, "User32.lib")
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -43,7 +40,7 @@ string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH
 string COOKIES_FILE = "cookies.txt";
 string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
 string AUDIO_FORMAT = "M4A(AAC)";
-bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false;
+bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false, USE_ARCHIVE = true;
 bool YTDLP_FOUND = false, FFMPEG_FOUND = false, QJS_FOUND = false;
 int LAST_ERROR = NOT_ERROR;
 string ARCHIVE_PATH = "";
@@ -97,7 +94,7 @@ void setUTF8() {
         dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(hOut, dwMode);
     }
-    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.1.0");
+    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.1.1");
 }
 
 void clearScreen() {
@@ -138,74 +135,84 @@ char getMenuChoice() {
     return c;
 }
 
-// ========== CLIPBOARD (DYNAMIC RUNTIME RESOLUTION) ==========
+// ========== CLIPBOARD HELPERS ==========
 string getClipboard() {
-    typedef BOOL(WINAPI* pfnOpenClipboard)(HWND);
-    typedef HANDLE(WINAPI* pfnGetClipboardData)(UINT);
-    typedef BOOL(WINAPI* pfnCloseClipboard)(void);
+    if (!OpenClipboard(NULL)) return "";
 
-    HMODULE hUser = LoadLibraryW(L"user32.dll");
-    if (!hUser) return "";
-
-    pfnOpenClipboard fnOpen = (pfnOpenClipboard)GetProcAddress(hUser, "OpenClipboard");
-    pfnGetClipboardData fnGet = (pfnGetClipboardData)GetProcAddress(hUser, "GetClipboardData");
-    pfnCloseClipboard fnClose = (pfnCloseClipboard)GetProcAddress(hUser, "CloseClipboard");
-
-    if (!fnOpen || !fnGet || !fnClose) {
-        FreeLibrary(hUser);
-        return "";
-    }
-
-    if (!fnOpen(NULL)) {
-        FreeLibrary(hUser);
-        return "";
-    }
-
-    HANDLE h = fnGet(CF_UNICODETEXT);
+    HANDLE h = GetClipboardData(CF_UNICODETEXT);
     if (!h) {
-        fnClose();
-        FreeLibrary(hUser);
+        CloseClipboard();
         return "";
     }
 
     wchar_t* t = (wchar_t*)GlobalLock(h);
     if (!t) {
-        fnClose();
-        FreeLibrary(hUser);
+        CloseClipboard();
         return "";
     }
 
     wstring r(t);
     GlobalUnlock(h);
-    fnClose();
-    FreeLibrary(hUser);
+    CloseClipboard();
     return wstringToUtf8(r);
 }
 
-// ========== KEYBOARD INPUT (WITH NATIVE EDITING & 0 TO RETURN) ==========
+// ========== KEYBOARD INPUT (WITH ESCAPE TO CANCEL, CTRL+V, BACKSPACE) ==========
 bool inputLineWithEscape(string& result, const string& prompt) {
-    if (!prompt.empty()) cout << prompt;
+    if (!prompt.empty()) cout << prompt << flush;
     result.clear();
 
-    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD prevMode = 0;
-    GetConsoleMode(hIn, &prevMode);
-    SetConsoleMode(hIn, prevMode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_QUICK_EDIT_MODE);
+    wstring buffer;
 
-    wchar_t wbuf[4096];
-    DWORD readChars = 0;
-    if (!ReadConsoleW(hIn, wbuf, 4095, &readChars, NULL)) {
-        return false;
+    while (true) {
+        wint_t wc = _getwch();
+
+        if (wc == 27) { // ESC key
+            cout << "\n";
+            return false;
+        }
+
+        if (wc == 13) { // Enter (\r)
+            cout << "\n";
+            break;
+        }
+
+        if (wc == 8) { // Backspace
+            if (!buffer.empty()) {
+                buffer.pop_back();
+                cout << "\b \b" << flush;
+            }
+            continue;
+        }
+
+        if (wc == 22) { // Ctrl+V (Paste)
+            string clip = getClipboard();
+            while (!clip.empty() && (clip.back() == '\r' || clip.back() == '\n')) clip.pop_back();
+            if (!clip.empty()) {
+                wstring wclip = utf8ToWstring(clip);
+                buffer += wclip;
+                cout << clip << flush;
+            }
+            continue;
+        }
+
+        if (wc == 3) { // Ctrl+C
+            cout << "\n";
+            return false;
+        }
+
+        if (wc == 0 || wc == 0xE0) { // Extended keys (arrows, F-keys, etc.)
+            (void)_getwch(); // consume the secondary scan code
+            continue;
+        }
+
+        if (wc >= 32) {
+            buffer.push_back((wchar_t)wc);
+            cout << wstringToUtf8(wstring(1, (wchar_t)wc)) << flush;
+        }
     }
 
-    while (readChars > 0 && (wbuf[readChars - 1] == L'\r' || wbuf[readChars - 1] == L'\n')) {
-        readChars--;
-    }
-    wbuf[readChars] = L'\0';
-
-    wstring ws(wbuf, readChars);
-    result = wstringToUtf8(ws);
-
+    result = wstringToUtf8(buffer);
     if (result == "0") {
         return false;
     }
@@ -300,7 +307,7 @@ void printComponentProgress(const string& label, double percent, const string& e
 }
 
 bool downloadFile(const string& url, const string& destFile, const string& label = "") {
-    HINTERNET hInternet = InternetOpenW(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) MR-CLI/1.1", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    HINTERNET hInternet = InternetOpenW(L"MR-CLI-FOR-YT-DLP/1.1.1", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) return false;
 
     DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_SECURE;
@@ -356,7 +363,7 @@ bool downloadFile(const string& url, const string& destFile, const string& label
 bool extractZip(const string& zipPath, const string& destDir) {
     if (!fileExists(zipPath) || !dirExists(destDir)) return false;
 
-    // 1. Ultra-fast native Windows tar.exe (System32 bsdtar on Windows 10/11 - instant extraction)
+    // 1. Fast native Windows tar.exe (System32 bsdtar on Windows 10/11)
     wchar_t sysDir[MAX_PATH];
     if (GetSystemDirectoryW(sysDir, MAX_PATH) > 0) {
         wstring tarExe = wstring(sysDir) + L"\\tar.exe";
@@ -374,54 +381,11 @@ bool extractZip(const string& zipPath, const string& destDir) {
         }
     }
 
-    // 2. Fallback to Windows Shell COM (for older Windows versions without tar.exe)
-    IShellDispatch* pISD = nullptr;
-    if (FAILED(CoCreateInstance(CLSID_Shell, NULL, CLSCTX_INPROC_SERVER, IID_IShellDispatch, (void**)&pISD)) || !pISD) {
-        return false;
-    }
-
-    VARIANT vZip, vDest;
-    VariantInit(&vZip);
-    VariantInit(&vDest);
-
-    fs::path absZip = fs::absolute(fs::u8path(zipPath));
-    fs::path absDest = fs::absolute(fs::u8path(destDir));
-
-    vZip.vt = VT_BSTR;
-    vZip.bstrVal = SysAllocString(absZip.wstring().c_str());
-
-    vDest.vt = VT_BSTR;
-    vDest.bstrVal = SysAllocString(absDest.wstring().c_str());
-
-    Folder* pZipFolder = nullptr;
-    Folder* pDestFolder = nullptr;
-    bool success = false;
-
-    if (SUCCEEDED(pISD->NameSpace(vZip, &pZipFolder)) && pZipFolder) {
-        if (SUCCEEDED(pISD->NameSpace(vDest, &pDestFolder)) && pDestFolder) {
-            FolderItems* pItems = nullptr;
-            if (SUCCEEDED(pZipFolder->Items(&pItems)) && pItems) {
-                VARIANT vItems, vOptions;
-                VariantInit(&vItems);
-                VariantInit(&vOptions);
-                vItems.vt = VT_DISPATCH;
-                vItems.pdispVal = pItems;
-                vOptions.vt = VT_I4;
-                vOptions.lVal = 4 | 16 | 512 | 1024; // FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI
-
-                HRESULT hr = pDestFolder->CopyHere(vItems, vOptions);
-                success = SUCCEEDED(hr);
-                pItems->Release();
-            }
-            pDestFolder->Release();
-        }
-        pZipFolder->Release();
-    }
-
-    VariantClear(&vZip);
-    VariantClear(&vDest);
-    pISD->Release();
-    return success;
+    // 2. Fallback to PowerShell Expand-Archive
+    wstring wDest = utf8ToWstring(destDir);
+    wstring wZip = utf8ToWstring(zipPath);
+    wstring psCmd = L"powershell.exe -NoProfile -NonInteractive -Command \"Expand-Archive -LiteralPath '" + wZip + L"' -DestinationPath '" + wDest + L"' -Force\"";
+    return (runProcessWait(psCmd) == 0);
 }
 
 void organizeExtractedTool(const string& targetExe, const string& destDir) {
@@ -508,6 +472,36 @@ string getArchivePath() {
     return CONFIG_PATH + "archive.txt";
 }
 
+void removeIdFromArchive(const string& id) {
+    if (id.empty() || id == "Destination") return;
+    string arcPath = getArchivePath();
+    if (!fileExists(arcPath)) return;
+    ifstream in(fs::u8path(arcPath));
+    if (!in.is_open()) return;
+    vector<string> lines;
+    string l;
+    bool found = false;
+    while (getline(in, l)) {
+        while (!l.empty() && (l.back() == '\r' || l.back() == '\n')) l.pop_back();
+        if (l.empty()) continue;
+        if (l.find(id) != string::npos) {
+            found = true;
+            continue;
+        }
+        lines.push_back(l);
+    }
+    in.close();
+    if (found) {
+        ofstream out(fs::u8path(arcPath), ios::trunc | ios::binary);
+        if (out.is_open()) {
+            for (const auto& line : lines) {
+                out << line << "\n";
+            }
+            out.close();
+        }
+    }
+}
+
 // ========== CONFIG ==========
 void saveConfig() {
     string configPath = CONFIG_PATH + "mr-config.txt";
@@ -523,6 +517,7 @@ void saveConfig() {
         << "VIDEO_FORMAT=" << VIDEO_FORMAT << "\n"
         << "AUDIO_FORMAT=" << AUDIO_FORMAT << "\n"
         << "CODEC_RECOMPILER=" << (CODEC_RECOMPILER ? "true" : "false") << "\n"
+        << "USE_ARCHIVE=" << (USE_ARCHIVE ? "true" : "false") << "\n"
         << "ONLY_AUDIO=" << (ONLY_AUDIO ? "true" : "false") << "\n"
         << "ONLY_VIDEO=" << (ONLY_VIDEO ? "true" : "false") << "\n";
     f.close();
@@ -550,6 +545,7 @@ void loadConfig() {
                 else if (l.find("VIDEO_FORMAT=") == 0) VIDEO_FORMAT = l.substr(13);
                 else if (l.find("AUDIO_FORMAT=") == 0) AUDIO_FORMAT = l.substr(13);
                 else if (l.find("CODEC_RECOMPILER=") == 0) CODEC_RECOMPILER = (l.substr(17) == "true");
+                else if (l.find("USE_ARCHIVE=") == 0) USE_ARCHIVE = (l.substr(12) == "true");
                 else if (l.find("ONLY_AUDIO=") == 0) ONLY_AUDIO = (l.substr(11) == "true");
                 else if (l.find("ONLY_VIDEO=") == 0) ONLY_VIDEO = (l.substr(11) == "true");
             }
@@ -613,55 +609,7 @@ string openFileDialog() {
     return "";
 }
 
-// ========== ENCRYPTED COOKIES (WINDOWS DPAPI) ==========
-static string g_tempCookiesPath = "";
-
-void cleanupTempCookiesFile() {
-    if (!g_tempCookiesPath.empty() && fileExists(g_tempCookiesPath)) {
-        // Secure wipe: overwrite with zeros before deleting
-        ofstream f(fs::u8path(g_tempCookiesPath), ios::in | ios::out | ios::binary);
-        if (f.is_open()) {
-            f.seekp(0, ios::end);
-            size_t sz = (size_t)f.tellp();
-            f.seekp(0, ios::beg);
-            vector<char> zeros(sz, 0);
-            f.write(zeros.data(), sz);
-            f.close();
-        }
-        std::error_code ec;
-        fs::remove(fs::u8path(g_tempCookiesPath), ec);
-        g_tempCookiesPath.clear();
-    }
-}
-
-bool encryptData(const string& plaintext, vector<BYTE>& encryptedData) {
-    if (plaintext.empty()) return false;
-    DATA_BLOB inBlob;
-    inBlob.pbData = (BYTE*)plaintext.data();
-    inBlob.cbData = (DWORD)plaintext.size();
-    DATA_BLOB outBlob;
-    if (CryptProtectData(&inBlob, L"MR_CLI_COOKIES", NULL, NULL, NULL, 0, &outBlob)) {
-        encryptedData.assign(outBlob.pbData, outBlob.pbData + outBlob.cbData);
-        LocalFree(outBlob.pbData);
-        return true;
-    }
-    return false;
-}
-
-bool decryptData(const vector<BYTE>& encryptedData, string& plaintext) {
-    if (encryptedData.empty()) return false;
-    DATA_BLOB inBlob;
-    inBlob.pbData = (BYTE*)encryptedData.data();
-    inBlob.cbData = (DWORD)encryptedData.size();
-    DATA_BLOB outBlob;
-    if (CryptUnprotectData(&inBlob, NULL, NULL, NULL, NULL, 0, &outBlob)) {
-        plaintext.assign((char*)outBlob.pbData, outBlob.cbData);
-        LocalFree(outBlob.pbData);
-        return true;
-    }
-    return false;
-}
-
+// ========== COOKIE STORAGE HELPERS ==========
 bool validateCookiesContent(const string& c) {
     if (c.find("# Netscape HTTP Cookie File") != string::npos) return true;
     stringstream ss(c); string l;
@@ -680,91 +628,38 @@ bool validateCookies(const string& p) {
     f.close(); return validateCookiesContent(c);
 }
 
+string getSavedCookiesPath() {
+    return CONFIG_PATH + "cookies.txt";
+}
+
+bool hasSavedCookies() {
+    return fileExists(getSavedCookiesPath());
+}
+
 bool saveCookies(const string& c) {
     string fullCookies = c;
     if (fullCookies.find("# Netscape HTTP Cookie File") == string::npos && fullCookies.find("[") != 0) {
-        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.0\n\n" + fullCookies;
+        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.1\n\n" + fullCookies;
     }
-    vector<BYTE> enc;
-    if (encryptData(fullCookies, enc)) {
-        string encPath = CONFIG_PATH + "cookies.dat";
-        ofstream f(fs::u8path(encPath), ios::binary);
-        if (f.is_open()) {
-            f.write((char*)enc.data(), enc.size());
-            f.close();
-            // Securely remove plain cookies.txt if it was there
-            string txtPath = CONFIG_PATH + "cookies.txt";
-            if (fileExists(txtPath)) {
-                std::error_code ec;
-                fs::remove(fs::u8path(txtPath), ec);
-            }
-            return true;
-        }
+    string txtPath = getSavedCookiesPath();
+    ofstream f(fs::u8path(txtPath), ios::binary);
+    if (f.is_open()) {
+        f.write(fullCookies.data(), fullCookies.size());
+        f.close();
+        return true;
     }
     return false;
 }
 
-string getDecryptedCookies() {
-    string encPath = CONFIG_PATH + "cookies.dat";
-    if (fileExists(encPath)) {
-        ifstream f(fs::u8path(encPath), ios::binary);
-        if (f.is_open()) {
-            vector<BYTE> enc((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
-            f.close();
-            string plain;
-            if (decryptData(enc, plain)) {
-                return plain;
-            }
-        }
-    }
-    // Auto-migration from legacy cookies.txt
-    string txtPath = CONFIG_PATH + "cookies.txt";
-    if (fileExists(txtPath)) {
-        ifstream f(fs::u8path(txtPath), ios::binary);
-        if (f.is_open()) {
-            string plain((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
-            f.close();
-            saveCookies(plain);
-            return plain;
-        }
-    }
-    return "";
-}
-
-bool hasSavedCookies() {
-    return fileExists(CONFIG_PATH + "cookies.dat") || fileExists(CONFIG_PATH + "cookies.txt");
-}
-
-string prepareTempCookiesFile() {
-    cleanupTempCookiesFile();
-    string plain = getDecryptedCookies();
-    if (plain.empty()) return "";
-
-    wchar_t tempDir[MAX_PATH];
-    if (GetTempPathW(MAX_PATH, tempDir) == 0) return "";
-
-    wstring tempFile = wstring(tempDir) + L".mr_yt_cookies_" + to_wstring(GetCurrentProcessId()) + L".tmp";
-    string u8TempFile = wstringToUtf8(tempFile);
-
-    ofstream f(fs::u8path(u8TempFile), ios::binary);
-    if (!f.is_open()) return "";
-    f.write(plain.data(), plain.size());
-    f.close();
-
-    SetFileAttributesW(tempFile.c_str(), FILE_ATTRIBUTE_TEMPORARY);
-    g_tempCookiesPath = u8TempFile;
-    return u8TempFile;
-}
-
-// ========== MENUS ==========
+// ========== COOKIE EDITOR MENU ==========
 string cookieEditor(bool fromSettings = false) {
     while (true) {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" COOKIE EDITOR (ENCRYPTED STORAGE)", CYAN);
+        printColor(" COOKIE EDITOR", CYAN);
         printColor("========================================", CYAN);
-        cout << "\nStatus: " << (hasSavedCookies() ? "[PROTECTED / ENCRYPTED]" : "[NOT CONFIGURED]") << "\n";
-        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n3. Edit in Notepad (Temporary decrypted)\n4. Delete saved cookies\n0. Exit to main menu\n\nYour choice: ";
+        cout << "\nStatus: " << (hasSavedCookies() ? "[CONFIGURED]" : "[NOT CONFIGURED]") << "\n";
+        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n3. Edit in Notepad\n4. Delete saved cookies\n0. Exit to main menu\n\nYour choice: ";
         char ch = getMenuChoice();
         if (ch == 27) {
             cout << "ESC" << endl;
@@ -786,7 +681,7 @@ string cookieEditor(bool fromSettings = false) {
                 if (saveCookies(c)) {
                     USE_COOKIES = true;
                     saveConfig();
-                    printColor("[OK] Cookies encrypted and saved securely!", GREEN);
+                    printColor("[OK] Cookies saved successfully!", GREEN);
                     waitForKey();
                     return fromSettings ? "settings" : "continue";
                 }
@@ -807,7 +702,7 @@ string cookieEditor(bool fromSettings = false) {
             if (validateCookiesContent(c) && saveCookies(c)) {
                 USE_COOKIES = true;
                 saveConfig();
-                printColor("[OK] Cookies encrypted and saved securely!", GREEN);
+                printColor("[OK] Cookies saved successfully!", GREEN);
                 waitForKey();
                 return fromSettings ? "settings" : "continue";
             }
@@ -816,40 +711,27 @@ string cookieEditor(bool fromSettings = false) {
             break;
         }
         case '3': {
-            string plain = getDecryptedCookies();
-            if (plain.empty()) {
-                plain = "# Netscape HTTP Cookie File\n# https://curl.haxx.se/rfc/cookie_spec.html\n# Paste cookies here, save, and close Notepad\n\n";
+            string txtPath = getSavedCookiesPath();
+            if (!fileExists(txtPath)) {
+                saveCookies("# Netscape HTTP Cookie File\n# Paste cookies here, save, and close Notepad\n\n");
             }
-            string tempEdit = prepareTempCookiesFile();
-            if (tempEdit.empty()) {
-                printColor("[ERROR] Failed to prepare temporary edit file!", RED);
-                waitForKey();
-                break;
-            }
-            wstring cmd = L"notepad.exe \"" + utf8ToWstring(tempEdit) + L"\"";
+            wstring cmd = L"notepad.exe \"" + utf8ToWstring(txtPath) + L"\"";
             runProcessWait(cmd);
-            if (fileExists(tempEdit) && validateCookies(tempEdit)) {
-                ifstream f(fs::u8path(tempEdit), ios::binary);
-                string c((istreambuf_iterator<char>(f)), istreambuf_iterator<char>());
-                f.close();
-                if (saveCookies(c)) {
-                    USE_COOKIES = true;
-                    saveConfig();
-                    printColor("[OK] Cookies updated and encrypted securely!", GREEN);
-                    cleanupTempCookiesFile();
-                    waitForKey();
-                    return fromSettings ? "settings" : "continue";
-                }
+            if (fileExists(txtPath) && validateCookies(txtPath)) {
+                USE_COOKIES = true;
+                saveConfig();
+                printColor("[OK] Cookies updated successfully!", GREEN);
+                waitForKey();
+                return fromSettings ? "settings" : "continue";
             }
-            cleanupTempCookiesFile();
-            printColor("[INFO] No changes saved.", YELLOW);
+            printColor("[INFO] No valid cookies saved.", YELLOW);
             waitForKey();
             break;
         }
         case '4': {
             std::error_code ec;
-            fs::remove(fs::u8path(CONFIG_PATH + "cookies.dat"), ec);
             fs::remove(fs::u8path(CONFIG_PATH + "cookies.txt"), ec);
+            fs::remove(fs::u8path(CONFIG_PATH + "cookies.dat"), ec);
             USE_COOKIES = false;
             saveConfig();
             printColor("[OK] Saved cookies removed!", GREEN);
@@ -969,6 +851,52 @@ bool waitForInternetAndRetry() {
     return true;
 }
 
+// ========== STREAM TYPE DETECTION ==========
+bool isAudioStream(const string& path, const string& ext) {
+    if (ONLY_AUDIO) return true;
+    if (ONLY_VIDEO) return false;
+
+    string extLower = ext;
+    for (char &ch : extLower) ch = (char)tolower((unsigned char)ch);
+
+    if (extLower == "m4a" || extLower == "aac" || extLower == "opus" ||
+        extLower == "ogg" || extLower == "mp3" || extLower == "flac" ||
+        extLower == "wav" || extLower == "weba" || extLower == "oga" || extLower == "mka") {
+        return true;
+    }
+
+    static const char* audioTags[] = {
+        ".f139.", ".f140.", ".f141.", ".f249.", ".f250.", ".f251.",
+        ".f256.", ".f258.", ".f325.", ".f328.", ".f599.", ".f600.",
+        ".ba.", ".audio.", "_audio."
+    };
+    for (const char* tag : audioTags) {
+        if (path.find(tag) != string::npos) return true;
+    }
+
+    if (extLower == "mp4" || extLower == "mkv" || extLower == "avi" ||
+        extLower == "flv" || extLower == "mov" || extLower == "wmv" ||
+        extLower == "ts" || extLower == "m4v") {
+        return false;
+    }
+
+    static const char* videoTags[] = {
+        ".f133.", ".f134.", ".f135.", ".f136.", ".f137.", ".f138.",
+        ".f160.", ".f242.", ".f243.", ".f244.", ".f247.", ".f248.",
+        ".f271.", ".f272.", ".f278.", ".f298.", ".f299.", ".f302.",
+        ".f303.", ".f308.", ".f313.", ".f315.", ".f330.", ".f331.",
+        ".f332.", ".f333.", ".f334.", ".f335.", ".f336.", ".f337.",
+        ".f394.", ".f395.", ".f396.", ".f397.", ".f398.", ".f399.",
+        ".f400.", ".f401.", ".f402.", ".f614.", ".f616.", ".f617.",
+        ".f620.", ".f625.", ".f628.", ".bv.", ".video.", "_video."
+    };
+    for (const char* tag : videoTags) {
+        if (path.find(tag) != string::npos) return false;
+    }
+
+    return false;
+}
+
 // ========== PROCESS EXECUTION WITH LIVE PROGRESS ==========
 bool execWithProgress(const wstring& cmdLine) {
     SECURITY_ATTRIBUTES sa;
@@ -1020,8 +948,9 @@ bool execWithProgress(const wstring& cmdLine) {
     bool progressActive = false;
     bool isPlaylist = false;
     bool mergeFailed = false;
-    bool inArchive = false;
     int curItem = 0, totalItems = 0;
+    string currentVideoId = "";
+    bool currentVideoCompleted = false;
     string mergeErrorPath = "";
     char buffer[4096];
     DWORD bytesRead = 0;
@@ -1034,6 +963,9 @@ bool execWithProgress(const wstring& cmdLine) {
                 if (progressActive) { cout << endl; progressActive = false; }
                 printColor("\n[INFO] Download cancelled by user (ESC).", YELLOW);
                 LAST_ERROR = CANCELLED_BY_USER;
+                if (!currentVideoId.empty()) {
+                    removeIdFromArchive(currentVideoId);
+                }
                 TerminateProcess(pi.hProcess, 1);
                 break;
             }
@@ -1080,9 +1012,38 @@ bool execWithProgress(const wstring& cmdLine) {
                         printColor("[WARNING] Network hiccup detected: " + line, YELLOW);
                     }
 
+                    // Extract Video ID from extractor lines (e.g., "[youtube] 3RkgTGP_5fY: ...")
+                    if (!line.empty() && line[0] == '[') {
+                        size_t bClose = line.find(']');
+                        if (bClose != string::npos && bClose + 2 < line.size()) {
+                            size_t colon = line.find(':', bClose + 1);
+                            if (colon != string::npos && colon > bClose + 2) {
+                                string possibleId = line.substr(bClose + 2, colon - (bClose + 2));
+                                while (!possibleId.empty() && possibleId.front() == ' ') possibleId.erase(possibleId.begin());
+                                while (!possibleId.empty() && possibleId.back() == ' ') possibleId.pop_back();
+                                if (possibleId != "Destination" && possibleId.find(' ') == string::npos && possibleId.size() >= 4 && possibleId.size() <= 64) {
+                                    if (possibleId != currentVideoId) {
+                                        if (!currentVideoCompleted && !currentVideoId.empty()) {
+                                            removeIdFromArchive(currentVideoId);
+                                        }
+                                        currentVideoId = possibleId;
+                                        currentVideoCompleted = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     if (line.find("[download] Downloading item ") == 0) {
                         int newCurItem = 0, newTotalItems = 0;
                         if (sscanf_s(line.c_str(), "[download] Downloading item %d of %d", &newCurItem, &newTotalItems) == 2) {
+                            if (curItem > 0 && newCurItem != curItem) {
+                                if (progressActive) { cout << endl; progressActive = false; }
+                                cout << "\n";
+                            }
+                            if (newCurItem != curItem) {
+                                currentVideoCompleted = false;
+                            }
                             curItem = newCurItem;
                             totalItems = newTotalItems;
                             TOTAL_ITEMS_IN_PLAYLIST = newTotalItems;
@@ -1093,7 +1054,7 @@ bool execWithProgress(const wstring& cmdLine) {
                     else if (line.find("has already been recorded in the archive") != string::npos) {
                         if (progressActive) { cout << endl; progressActive = false; }
                         printColor("[INFO] Video already downloaded (in archive, skipping).", GREEN);
-                        inArchive = true;
+                        currentVideoCompleted = true;
                     }
                     else if (line.find("[download] Destination:") == 0) {
                         string path = line.substr(string("[download] Destination:").length());
@@ -1102,18 +1063,48 @@ bool execWithProgress(const wstring& cmdLine) {
                         size_t slash = path.find_last_of("\\/");
                         string name = (slash != string::npos) ? path.substr(slash + 1) : path;
                         size_t dot = name.find_last_of('.');
-                        if (dot != string::npos) name = name.substr(0, dot);
+                        string ext = "";
+                        if (dot != string::npos) {
+                            ext = name.substr(dot + 1);
+                            name = name.substr(0, dot);
+                        }
+
+                        size_t fDot = name.find_last_of('.');
+                        if (fDot != string::npos && fDot + 1 < name.size() && (name[fDot + 1] == 'f' || name[fDot + 1] == 'F')) {
+                            bool allDigits = true;
+                            for (size_t k = fDot + 2; k < name.size(); k++) {
+                                if (!isdigit((unsigned char)name[k])) { allDigits = false; break; }
+                            }
+                            if (allDigits && fDot + 2 <= name.size()) {
+                                name = name.substr(0, fDot);
+                            }
+                        }
+
+                        // Strip leading playlist index prefix (e.g. "003 - ") from displayed name
+                        if (totalItems > 0) {
+                            size_t digitEnd = 0;
+                            while (digitEnd < name.size() && isdigit((unsigned char)name[digitEnd])) {
+                                digitEnd++;
+                            }
+                            if (digitEnd > 0 && digitEnd < name.size()) {
+                                if (name.substr(digitEnd, 3) == " - ") {
+                                    name = name.substr(digitEnd + 3);
+                                }
+                                else if (name.substr(digitEnd, 2) == "- ") {
+                                    name = name.substr(digitEnd + 2);
+                                }
+                            }
+                        }
 
                         if (progressActive) { cout << endl; progressActive = false; }
 
-                        string prefix = "";
-                        if (ONLY_AUDIO) prefix = "[Only audio] ";
-                        else if (ONLY_VIDEO) prefix = "[Only video] ";
+                        bool isAudio = isAudioStream(path, ext);
+                        string mediaType = isAudio ? "Audio" : "Video";
 
                         if (totalItems > 0)
-                            printColor(prefix + "Downloading " + to_string(curItem) + " of " + to_string(totalItems) + " - " + name, CYAN);
+                            printColor("Downloading " + mediaType + " " + to_string(curItem) + " of " + to_string(totalItems) + " - " + name, CYAN);
                         else
-                            printColor(prefix + "Downloading into \"" + path + "\"", CYAN);
+                            printColor("Downloading " + mediaType + " into \"" + path + "\"", CYAN);
                     }
                     else if (line.find("[Merger] Merging formats into") == 0) {
                         if (progressActive) { cout << endl; progressActive = false; }
@@ -1121,10 +1112,16 @@ bool execWithProgress(const wstring& cmdLine) {
                         while (!path.empty() && path.front() == ' ') path.erase(path.begin());
                         if (!path.empty() && path.back() == '"') path.pop_back();
                         printColor("[Merger] Merging video and audio into \"" + path + "\"", CYAN);
+                        currentVideoCompleted = true;
                     }
                     else if (parseDownloadLine(line, percent, speed, eta)) {
                         printProgressBar(percent, speed, eta);
                         progressActive = true;
+                        if (percent == "100" || percent == "100.0" || percent == "100.0%") {
+                            if (ONLY_AUDIO || ONLY_VIDEO) {
+                                currentVideoCompleted = true;
+                            }
+                        }
                     }
                     else if (line.find("[Merger]") == 0 || line.find("[ExtractAudio]") == 0 ||
                         line.find("[VideoConvertor]") == 0 || line.find("[Fixup") == 0) {
@@ -1151,10 +1148,6 @@ bool execWithProgress(const wstring& cmdLine) {
                         printColor("\n[RATE LIMIT] " + line, RED);
                     }
                     else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
-                        if (line.find("[PYI-") != string::npos && inArchive) {
-                            line.clear();
-                            continue;
-                        }
                         if (progressActive) { cout << endl; progressActive = false; }
 
                         if (line.find("Sign in to confirm you're not a bot") != string::npos ||
@@ -1212,6 +1205,9 @@ bool execWithProgress(const wstring& cmdLine) {
     CloseHandle(pi.hThread);
 
     if (LAST_ERROR == CANCELLED_BY_USER) {
+        if (!currentVideoId.empty()) {
+            removeIdFromArchive(currentVideoId);
+        }
         return false;
     }
 
@@ -1269,18 +1265,22 @@ bool execWithProgress(const wstring& cmdLine) {
         }
     }
 
-    if (inArchive) {
-        cleanupTempCookiesFile();
-        LAST_ERROR = NOT_ERROR;
-        return true;
+    if (mergeFailed && !currentVideoId.empty()) {
+        removeIdFromArchive(currentVideoId);
+    }
+
+    if (!currentVideoCompleted && !currentVideoId.empty() && (LAST_ERROR != NOT_ERROR || exitCode != 0)) {
+        removeIdFromArchive(currentVideoId);
+    }
+
+    if (LAST_ERROR != NOT_ERROR) {
+        return false;
     }
 
     if (totalItems > 0 && curItem >= totalItems) {
-        cleanupTempCookiesFile();
         return true;
     }
 
-    cleanupTempCookiesFile();
     return (exitCode == 0);
 }
 
@@ -1289,13 +1289,10 @@ wstring buildCommand(const string& url, const string& start, const string& end, 
     wstring cmd = L"\"" + utf8ToWstring(YTDLP_PATH.empty() ? (CONFIG_PATH + "yt-dlp.exe") : YTDLP_PATH) + L"\"";
 
     if (USE_COOKIES && hasSavedCookies()) {
-        string tempCookiePath = prepareTempCookiesFile();
-        if (!tempCookiePath.empty()) {
-            cmd += L" --cookies \"" + utf8ToWstring(tempCookiePath) + L"\"";
-        }
+        cmd += L" --cookies \"" + utf8ToWstring(getSavedCookiesPath()) + L"\"";
     }
 
-    if (!ARCHIVE_PATH.empty()) {
+    if (USE_ARCHIVE && !ARCHIVE_PATH.empty()) {
         cmd += L" --download-archive \"" + utf8ToWstring(ARCHIVE_PATH) + L"\"";
     }
 
@@ -1408,8 +1405,13 @@ void startDownload(const string& url = "", const string& start = "", const strin
             printColor("============================================", CYAN);
             printColor(" URL contains both a video and a playlist:", CYAN);
             printColor("============================================", CYAN);
-            cout << "\n1. Download entire playlist\n2. Download only this video\n\nYour choice: ";
+            cout << "\n1. Download entire playlist\n2. Download only this video\n0. Cancel (ESC)\n\nYour choice: ";
             char plChoice = getMenuChoice();
+            if (plChoice == 27 || plChoice == '0') {
+                printColor("\n[INFO] Cancelled", YELLOW);
+                waitForKey();
+                return;
+            }
             cout << plChoice << endl;
             if (plChoice == '1') {
                 isPl = true;
@@ -1740,6 +1742,9 @@ void codecRecompilerMenu() {
     cout << "\nThis ensures maximum compatibility with older TVs and players.\n";
     cout << "\n1. Toggle ON/OFF\n0. Return (ESC)\n\nYour choice: ";
     char ch = getMenuChoice();
+    if (ch == 27 || ch == '0') {
+        return;
+    }
     if (ch == '1') {
         CODEC_RECOMPILER = !CODEC_RECOMPILER;
         saveConfig();
@@ -1753,8 +1758,10 @@ void selectVideoQuality() {
     printColor("========================================", CYAN);
     printColor(" Select video resolution", CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) 2160p (4k)\n2) 1440p (2k)\n3) 1080p (FullHD)\n4) 720p (HD)\n5) 480p\n6) 360p\n\nYour choice: ";
-    char ch = getMenuChoice(); cout << ch << endl;
+    cout << "\n1) 2160p (4k)\n2) 1440p (2k)\n3) 1080p (FullHD)\n4) 720p (HD)\n5) 480p\n6) 360p\n0) Cancel (ESC)\n\nYour choice: ";
+    char ch = getMenuChoice();
+    if (ch == 27 || ch == '0') return;
+    cout << ch << endl;
     switch (ch) {
     case '1': VIDEO_RESOLUTION = "2160"; break;
     case '2': VIDEO_RESOLUTION = "1440"; break;
@@ -1769,8 +1776,10 @@ void selectVideoQuality() {
     printColor("========================================", CYAN);
     printColor(" Select frame rate", CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) 60fps (or best)\n2) 30fps\n\nYour choice: ";
-    ch = getMenuChoice(); cout << ch << endl;
+    cout << "\n1) 60fps (or best)\n2) 30fps\n0) Cancel (ESC)\n\nYour choice: ";
+    ch = getMenuChoice();
+    if (ch == 27 || ch == '0') return;
+    cout << ch << endl;
     switch (ch) {
     case '1': VIDEO_FPS = "60"; break;
     case '2': VIDEO_FPS = "30"; break;
@@ -1781,8 +1790,10 @@ void selectVideoQuality() {
     printColor("========================================", CYAN);
     printColor(" Select video format", CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) MP4(H.264)\n2) MP4(AV1)\n3) WEBM(AV1)\n4) WEBM(VP9)\n\nYour choice: ";
-    ch = getMenuChoice(); cout << ch << endl;
+    cout << "\n1) MP4(H.264)\n2) MP4(AV1)\n3) WEBM(AV1)\n4) WEBM(VP9)\n0) Cancel (ESC)\n\nYour choice: ";
+    ch = getMenuChoice();
+    if (ch == 27 || ch == '0') return;
+    cout << ch << endl;
     switch (ch) {
     case '1': VIDEO_FORMAT = "MP4(H.264)"; break;
     case '2': VIDEO_FORMAT = "MP4(AV1)"; break;
@@ -1800,8 +1811,10 @@ void selectAudioQuality() {
     printColor("========================================", CYAN);
     printColor(" Select audio format", CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) M4A(AAC)\n2) WEBM(Opus)\n3) WEBM(Vorbis)\n\nYour choice: ";
-    char ch = getMenuChoice(); cout << ch << endl;
+    cout << "\n1) M4A(AAC)\n2) WEBM(Opus)\n3) WEBM(Vorbis)\n0) Cancel (ESC)\n\nYour choice: ";
+    char ch = getMenuChoice();
+    if (ch == 27 || ch == '0') return;
+    cout << ch << endl;
     switch (ch) {
     case '1': AUDIO_FORMAT = "M4A(AAC)"; break;
     case '2': AUDIO_FORMAT = "WEBM(Opus)"; break;
@@ -1833,6 +1846,9 @@ void updateComponentsMenu() {
     printColor("========================================", CYAN);
     cout << "\n1. Update yt-dlp (yt-dlp -U)\n2. Re-download FFmpeg\n3. Re-download QuickJS\n0. Return (ESC)\n\nYour choice: ";
     char ch = getMenuChoice();
+    if (ch == 27 || ch == '0') {
+        return;
+    }
     if (ch == '1') {
         clearScreen();
         printColor("========================================", CYAN);
@@ -1917,6 +1933,35 @@ void updateComponentsMenu() {
     }
 }
 
+void toggleUseArchive() {
+    USE_ARCHIVE = !USE_ARCHIVE;
+    saveConfig();
+}
+
+void clearArchiveMenu() {
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" CLEAR DOWNLOAD ARCHIVE HISTORY", CYAN);
+    printColor("========================================", CYAN);
+    string arcPath = getArchivePath();
+    if (!fileExists(arcPath)) {
+        printColor("\n[INFO] Download archive is already empty.", YELLOW);
+        waitForKey();
+        return;
+    }
+    cout << "\nAre you sure you want to clear the download history archive? (y/n): ";
+    char ch = getMenuChoice();
+    if (ch == 'y' || ch == 'Y') {
+        std::error_code ec;
+        fs::remove(fs::u8path(arcPath), ec);
+        printColor("\n[OK] Download archive history cleared successfully!", GREEN);
+    }
+    else {
+        printColor("\n[INFO] Cancelled.", YELLOW);
+    }
+    waitForKey();
+}
+
 // ========== SETTINGS ==========
 void settingsMenu() {
     while (true) {
@@ -1928,10 +1973,12 @@ void settingsMenu() {
             << "\n2. Video quality: [" << VIDEO_RESOLUTION << "p " << VIDEO_FPS << "fps " << VIDEO_FORMAT << "]"
             << "\n3. Audio quality: [" << AUDIO_FORMAT << "]"
             << "\n4. Codec recompiler: [" << (CODEC_RECOMPILER ? "ON" : "OFF") << "]"
-            << "\n5. Only audio: [" << (ONLY_AUDIO ? "ON" : "OFF") << "]"
-            << "\n6. Only video: [" << (ONLY_VIDEO ? "ON" : "OFF") << "]"
-            << "\n7. Update cookies"
-            << "\n8. Update yt-dlp & components"
+            << "\n5. Skip already downloaded (archive): [" << (USE_ARCHIVE ? "ON" : "OFF") << "]"
+            << "\n6. Only audio: [" << (ONLY_AUDIO ? "ON" : "OFF") << "]"
+            << "\n7. Only video: [" << (ONLY_VIDEO ? "ON" : "OFF") << "]"
+            << "\n8. Clear download history (archive)"
+            << "\n9. Update cookies"
+            << "\nu. Update yt-dlp & components"
             << "\n0. Return (ESC)\n\nYour choice: ";
         char ch = getMenuChoice();
         if (ch == 27 || ch == '0') {
@@ -1956,10 +2003,12 @@ void settingsMenu() {
         case '2': selectVideoQuality(); break;
         case '3': selectAudioQuality(); break;
         case '4': codecRecompilerMenu(); break;
-        case '5': toggleOnlyAudio(); break;
-        case '6': toggleOnlyVideo(); break;
-        case '7': clearScreen(); cookieEditor(true); saveConfig(); break;
-        case '8': updateComponentsMenu(); break;
+        case '5': toggleUseArchive(); break;
+        case '6': toggleOnlyAudio(); break;
+        case '7': toggleOnlyVideo(); break;
+        case '8': clearArchiveMenu(); break;
+        case '9': clearScreen(); cookieEditor(true); saveConfig(); break;
+        case 'u': case 'U': updateComponentsMenu(); break;
         default: printColor("[ERROR] Invalid choice!", RED); waitForKey();
         }
     }
@@ -2118,19 +2167,17 @@ bool checkDependencies() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.1.0", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.1.1", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
     printColor(" YT-DLP:  " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), YTDLP_FOUND ? GREEN : RED);
     printColor(" FFMPEG:  " + string(FFMPEG_FOUND ? "[OK] installed" : "[WARNING] not installed"), FFMPEG_FOUND ? GREEN : YELLOW);
     printColor(" QuickJS: " + string(QJS_FOUND ? "[OK] installed" : "[WARNING] not installed"), QJS_FOUND ? GREEN : YELLOW);
     printColor("========================================", GREEN);
-    cout << "========================================\n1. Start download\n2. Settings\n0. Exit\n========================================\n\nYour number choice: ";
+    cout << "========================================\n1. Start download\n2. Settings\n0. Exit (ESC)\n========================================\n\nYour number choice: ";
 }
 
 int main() {
-    atexit(cleanupTempCookiesFile);
-
     // Initialize COM for Windows Shell, Folder Dialogs, and Shell Zip extraction
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -2167,14 +2214,15 @@ int main() {
     while (true) {
         displayMenu();
         char ch = getMenuChoice();
+        if (ch == 27 || ch == '0') {
+            cout << "Exiting...\n";
+            CoUninitialize();
+            return 0;
+        }
         cout << ch << "\n\n";
         switch (ch) {
         case '1': startDownload(); break;
         case '2': settingsMenu(); break;
-        case '0':
-            cout << "Exiting...\n";
-            CoUninitialize();
-            return 0;
         default:
             printColor("[ERROR] Invalid choice!", RED);
             waitForKey();

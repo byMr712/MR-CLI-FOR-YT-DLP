@@ -4,9 +4,9 @@
 
 **MR CLI FOR YT DLP** is a command-line interface wrapper for original yt-dlp.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.1.1-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
-[![License](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 
 ## 🎯 Program Features
@@ -19,8 +19,6 @@
 
 ## 📋 Prerequisites
 - Windows 10/11 (The versions below—please test them)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) in PATH (auto-installed if missing)
-- [FFmpeg](https://ffmpeg.org/) in PATH (auto-installed if missing)
 
 ## 📥 Installation
 1. Download the latest release
@@ -103,7 +101,7 @@ The built-in cookie editor helps you access restricted content:
 5. Create a Pull Request
 
 ## 📄 License
-1. MIT License – feel free to use and modify!
+1. [Apache License 2.0](LICENSE) – feel free to use and modify!
 
 ## 🙏 Many thanks to
 1. [yt-dlp](https://github.com/yt-dlp/yt-dlp)

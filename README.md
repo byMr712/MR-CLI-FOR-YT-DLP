@@ -4,9 +4,9 @@
 
 **MR CLI FOR YT DLP** — это интерфейс командной строки (обёртка) для оригинального yt-dlp.
 
-[![Version](https://img.shields.io/badge/version-1.1.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.1.1-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
-[![License](https://img.shields.io/badge/license-MIT-green.svg)]()
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 
 ## 🎯 Возможности программы
@@ -19,8 +19,6 @@
 
 ## 📋 Системные требования
 - Windows 10/11 (более ранние версии — протестируйте самостоятельно)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) в PATH (устанавливается автоматически, если отсутствует)
-- [FFmpeg](https://ffmpeg.org/) в PATH (устанавливается автоматически, если отсутствует)
 
 ## 📥 Установка
 1. Скачайте последний релиз
@@ -103,7 +101,7 @@
 5. Создайте Pull Request
 
 ## 📄 Лицензия
-1. Лицензия MIT — пользуйтесь и изменяйте свободно!
+1. Лицензия [Apache 2.0](LICENSE) — пользуйтесь и изменяйте свободно!
 
 ## 🙏 Выражаю большую благодарность
 1. [yt-dlp](https://github.com/yt-dlp/yt-dlp)
