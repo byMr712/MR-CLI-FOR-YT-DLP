@@ -2,11 +2,13 @@
 
 > **Язык:** Русский · [English](README.en.md)
 
-**MR CLI FOR YT DLP** — это интерфейс командной строки (обёртка) для оригинального yt-dlp.
+## 📋 Описание
+
+MR CLI FOR YT DLP — это удобная консольная программа-обёртка над yt-dlp, предоставляющая интуитивное меню для выполнения разнообразных операций с видео и аудио файлами без необходимости запоминать сложные команды yt-dlp.
 
 [![Version](https://img.shields.io/badge/version-1.1.1-green.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
 
 ## 🎯 Возможности программы
