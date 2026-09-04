@@ -8,6 +8,7 @@
 #include <sstream>
 #include <algorithm>
 #include <shlobj.h>
+#include <shobjidl.h>
 #include <commdlg.h>
 #include <locale>
 #include <cctype>
@@ -68,6 +69,65 @@ wstring utf8ToWstring(const string& str) {
     return result;
 }
 
+// ========== LANGUAGE ==========
+enum Language { LANG_EN = 0, LANG_RU = 1 };
+Language CURRENT_LANG = LANG_EN;
+
+void initDefaultLanguage() {
+    WORD langId = GetUserDefaultUILanguage();
+    WORD primary = PRIMARYLANGID(langId);
+    if (primary == LANG_RUSSIAN || primary == LANG_BELARUSIAN || primary == LANG_UKRAINIAN) {
+        CURRENT_LANG = LANG_RU;
+    } else {
+        CURRENT_LANG = LANG_EN;
+    }
+}
+
+// ========== BILINGUAL KEYBOARD MAPPING (QWERTY <-> ЙЦУКЕН) ==========
+char normalizeKeyToEnglish(wint_t wc) {
+    if (wc < 128) return (char)wc;
+    switch (wc) {
+        case 0x0439: case 0x0419: return 'q';  // й Й
+        case 0x0446: case 0x0426: return 'w';  // ц Ц
+        case 0x0443: case 0x0423: return 'e';  // у У
+        case 0x043A: case 0x041A: return 'r';  // к К
+        case 0x0435: case 0x0415: return 't';  // е Е
+        case 0x043D: case 0x041D: return 'y';  // н Н
+        case 0x0433: case 0x0413: return 'u';  // г Г
+        case 0x0448: case 0x0428: return 'i';  // ш Ш
+        case 0x0449: case 0x0429: return 'o';  // щ Щ
+        case 0x0437: case 0x0417: return 'p';  // з З
+        case 0x0445: case 0x0425: return '[';  // х Х
+        case 0x044A: case 0x042A: return ']';  // ъ Ъ
+        case 0x0444: case 0x0424: return 'a';  // ф Ф
+        case 0x044B: case 0x042B: return 's';  // ы Ы
+        case 0x0432: case 0x0412: return 'd';  // в В
+        case 0x0430: case 0x0410: return 'f';  // а А
+        case 0x043F: case 0x041F: return 'g';  // п П
+        case 0x0440: case 0x0420: return 'h';  // р Р
+        case 0x043E: case 0x041E: return 'j';  // о О
+        case 0x043B: case 0x041B: return 'k';  // л Л
+        case 0x0434: case 0x0414: return 'l';  // д Д
+        case 0x0436: case 0x0416: return ';';  // ж Ж
+        case 0x044D: case 0x042D: return '\''; // э Э
+        case 0x044F: case 0x042F: return 'z';  // я Я
+        case 0x0447: case 0x0427: return 'x';  // ч Ч
+        case 0x0441: case 0x0421: return 'c';  // с С
+        case 0x043C: case 0x041C: return 'v';  // м М
+        case 0x0438: case 0x0418: return 'b';  // и И
+        case 0x0442: case 0x0422: return 'n';  // т Т
+        case 0x044C: case 0x042C: return 'm';  // ь Ь
+        case 0x0431: case 0x0411: return ',';  // б Б
+        case 0x044E: case 0x042E: return '.';  // ю Ю
+        default: return (char)(wc & 0xFF);
+    }
+}
+
+// ========== LOCALIZATION ==========
+string tr(const string& en, const string& ru) {
+    return (CURRENT_LANG == LANG_RU) ? ru : en;
+}
+
 // ========== COLORS ==========
 enum Color { BLACK = 0, BLUE = 1, GREEN = 2, RED = 4, YELLOW = 6, WHITE = 7, CYAN = 11 };
 
@@ -94,7 +154,7 @@ void setUTF8() {
         dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         SetConsoleMode(hOut, dwMode);
     }
-    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.1.1");
+    SetConsoleTitleW(L"MR CLI FOR YT-DLP v1.1.2");
 }
 
 void clearScreen() {
@@ -117,7 +177,7 @@ void clearScreen() {
 }
 
 void waitForKey() {
-    cout << "\nPress any key...";
+    cout << "\n" << tr("Press any key...", "Нажмите любую клавишу...") << flush;
     (void)_getch();
     while (_kbhit()) (void)_getch();
     cout << "\n";
@@ -127,8 +187,13 @@ char getMenuChoice() {
     while (_kbhit()) {
         (void)_getch();
     }
-    char c = _getch();
-    if (c == 27) return 27; // ESC
+    wint_t wc = _getwch();
+    if (wc == 27) return 27; // ESC
+    if (wc == 0 || wc == 0xE0) {
+        (void)_getwch(); // consume extended scan code
+        return 0;
+    }
+    char c = normalizeKeyToEnglish(wc);
     if (c >= 'A' && c <= 'Z') {
         c += 32;
     }
@@ -307,7 +372,7 @@ void printComponentProgress(const string& label, double percent, const string& e
 }
 
 bool downloadFile(const string& url, const string& destFile, const string& label = "") {
-    HINTERNET hInternet = InternetOpenW(L"MR-CLI-FOR-YT-DLP/1.1.1", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    HINTERNET hInternet = InternetOpenW(L"MR-CLI-FOR-YT-DLP/1.1.2", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) return false;
 
     DWORD flags = INTERNET_FLAG_RELOAD | INTERNET_FLAG_DONT_CACHE | INTERNET_FLAG_KEEP_CONNECTION | INTERNET_FLAG_SECURE;
@@ -462,7 +527,7 @@ void printProgressBar(const string& percentStr, const string& speed, const strin
     for (int i = 0; i < barWidth; i++) line += (i < pos) ? '=' : (i == pos ? '>' : ' ');
     line += "] " + percentStr + "%";
     if (!speed.empty()) line += "  " + speed;
-    if (!eta.empty()) line += "  ETA " + eta;
+    if (!eta.empty()) line += "  " + tr("ETA ", "Осталось ") + eta;
     line += "        ";
     cout << line << flush;
 }
@@ -519,7 +584,8 @@ void saveConfig() {
         << "CODEC_RECOMPILER=" << (CODEC_RECOMPILER ? "true" : "false") << "\n"
         << "USE_ARCHIVE=" << (USE_ARCHIVE ? "true" : "false") << "\n"
         << "ONLY_AUDIO=" << (ONLY_AUDIO ? "true" : "false") << "\n"
-        << "ONLY_VIDEO=" << (ONLY_VIDEO ? "true" : "false") << "\n";
+        << "ONLY_VIDEO=" << (ONLY_VIDEO ? "true" : "false") << "\n"
+        << "LANGUAGE=" << (CURRENT_LANG == LANG_RU ? "ru" : "en") << "\n";
     f.close();
 }
 
@@ -548,6 +614,7 @@ void loadConfig() {
                 else if (l.find("USE_ARCHIVE=") == 0) USE_ARCHIVE = (l.substr(12) == "true");
                 else if (l.find("ONLY_AUDIO=") == 0) ONLY_AUDIO = (l.substr(11) == "true");
                 else if (l.find("ONLY_VIDEO=") == 0) ONLY_VIDEO = (l.substr(11) == "true");
+                else if (l.find("LANGUAGE=") == 0) CURRENT_LANG = (l.substr(9) == "ru") ? LANG_RU : LANG_EN;
             }
             f.close();
         }
@@ -573,23 +640,35 @@ void loadConfig() {
 }
 
 // ========== DIALOGS ==========
-string openFolderDialog() {
-    BROWSEINFOW bi = { 0 };
-    bi.lpszTitle = L"Select folder";
-    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+string openFolderDialog(const wchar_t* title = L"Select folder") {
+    IFileDialog* pfd = nullptr;
+    HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                  IID_PPV_ARGS(&pfd));
+    if (FAILED(hr)) return "";
 
-    LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
-    if (!pidl) return "";
+    DWORD dwOptions;
+    pfd->GetOptions(&dwOptions);
+    pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+    pfd->SetTitle(title);
 
-    wchar_t p[MAX_PATH];
-    if (SHGetPathFromIDListW(pidl, p)) {
-        CoTaskMemFree(pidl);
-        wstring wp(p);
-        if (wp.back() != L'\\' && wp.back() != L'/') wp += L'\\';
-        return wstringToUtf8(wp);
-    }
-    CoTaskMemFree(pidl);
-    return "";
+    hr = pfd->Show(nullptr);
+    if (FAILED(hr)) { pfd->Release(); return ""; }
+
+    IShellItem* psi = nullptr;
+    hr = pfd->GetResult(&psi);
+    if (FAILED(hr)) { pfd->Release(); return ""; }
+
+    wchar_t* pPath = nullptr;
+    hr = psi->GetDisplayName(SIGDN_FILESYSPATH, &pPath);
+    psi->Release();
+    pfd->Release();
+
+    if (FAILED(hr) || !pPath) return "";
+
+    wstring result(pPath);
+    CoTaskMemFree(pPath);
+    if (result.back() != L'\\' && result.back() != L'/') result += L'\\';
+    return wstringToUtf8(result);
 }
 
 string openFileDialog() {
@@ -597,11 +676,14 @@ string openFileDialog() {
     wchar_t fn[MAX_PATH] = L"";
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = GetConsoleWindow();
-    ofn.lpstrFilter = L"Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
+    ofn.lpstrFilter = (CURRENT_LANG == LANG_RU) ?
+        L"Текстовые файлы (*.txt)\0*.txt\0Все файлы (*.*)\0*.*\0" :
+        L"Text Files (*.txt)\0*.txt\0All Files (*.*)\0*.*\0";
     ofn.lpstrFile = fn;
     ofn.nMaxFile = MAX_PATH;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
-    ofn.lpstrTitle = L"Select cookies file";
+    wstring dlgTitle = (CURRENT_LANG == LANG_RU) ? L"Выберите файл куки" : L"Select cookies file";
+    ofn.lpstrTitle = dlgTitle.c_str();
 
     if (GetOpenFileNameW(&ofn)) {
         return wstringToUtf8(wstring(fn));
@@ -639,7 +721,7 @@ bool hasSavedCookies() {
 bool saveCookies(const string& c) {
     string fullCookies = c;
     if (fullCookies.find("# Netscape HTTP Cookie File") == string::npos && fullCookies.find("[") != 0) {
-        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.1\n\n" + fullCookies;
+        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.2\n\n" + fullCookies;
     }
     string txtPath = getSavedCookiesPath();
     ofstream f(fs::u8path(txtPath), ios::binary);
@@ -656,10 +738,15 @@ string cookieEditor(bool fromSettings = false) {
     while (true) {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" COOKIE EDITOR", CYAN);
+        printColor(tr(" COOKIE EDITOR", " РЕДАКТОР КУКИ"), CYAN);
         printColor("========================================", CYAN);
-        cout << "\nStatus: " << (hasSavedCookies() ? "[CONFIGURED]" : "[NOT CONFIGURED]") << "\n";
-        cout << "\n1. Select cookies file (.txt)\n2. Paste from clipboard\n3. Edit in Notepad\n4. Delete saved cookies\n0. Exit to main menu\n\nYour choice: ";
+        cout << "\n" << tr("Status: ", "Статус: ") << (hasSavedCookies() ? tr("[CONFIGURED]", "[НАСТРОЕНО]") : tr("[NOT CONFIGURED]", "[НЕ НАСТРОЕНО]")) << "\n";
+        cout << "\n1. " << tr("Select cookies file (.txt)", "Выбрать файл куки (.txt)")
+            << "\n2. " << tr("Paste from clipboard", "Вставить из буфера обмена")
+            << "\n3. " << tr("Edit in Notepad", "Редактировать в Блокноте")
+            << "\n4. " << tr("Delete saved cookies", "Удалить сохранённые куки")
+            << "\n0. " << tr("Exit to main menu", "Выход в главное меню")
+            << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
         char ch = getMenuChoice();
         if (ch == 27) {
             cout << "ESC" << endl;
@@ -670,7 +757,7 @@ string cookieEditor(bool fromSettings = false) {
         case '1': {
             string p = openFileDialog();
             if (p.empty()) {
-                printColor("[INFO] Selection cancelled", YELLOW);
+                printColor(tr("[INFO] Selection cancelled", "[ИНФО] Выбор отменён"), YELLOW);
                 waitForKey();
                 break;
             }
@@ -681,13 +768,13 @@ string cookieEditor(bool fromSettings = false) {
                 if (saveCookies(c)) {
                     USE_COOKIES = true;
                     saveConfig();
-                    printColor("[OK] Cookies saved successfully!", GREEN);
+                    printColor(tr("[OK] Cookies saved successfully!", "[OK] Куки успешно сохранены!"), GREEN);
                     waitForKey();
                     return fromSettings ? "settings" : "continue";
                 }
             }
             else {
-                printColor("[ERROR] Invalid cookies file! Netscape format required.", RED);
+                printColor(tr("[ERROR] Invalid cookies file! Netscape format required.", "[ОШИБКА] Неверный файл куки! Требуется формат Netscape."), RED);
                 waitForKey();
             }
             break;
@@ -695,18 +782,18 @@ string cookieEditor(bool fromSettings = false) {
         case '2': {
             string c = getClipboard();
             if (c.empty()) {
-                printColor("[ERROR] Clipboard is empty!", RED);
+                printColor(tr("[ERROR] Clipboard is empty!", "[ОШИБКА] Буфер обмена пуст!"), RED);
                 waitForKey();
                 break;
             }
             if (validateCookiesContent(c) && saveCookies(c)) {
                 USE_COOKIES = true;
                 saveConfig();
-                printColor("[OK] Cookies saved successfully!", GREEN);
+                printColor(tr("[OK] Cookies saved successfully!", "[OK] Куки успешно сохранены!"), GREEN);
                 waitForKey();
                 return fromSettings ? "settings" : "continue";
             }
-            printColor("[ERROR] Invalid cookies format in clipboard!", RED);
+            printColor(tr("[ERROR] Invalid cookies format in clipboard!", "[ОШИБКА] Неверный формат куки в буфере обмена!"), RED);
             waitForKey();
             break;
         }
@@ -720,11 +807,11 @@ string cookieEditor(bool fromSettings = false) {
             if (fileExists(txtPath) && validateCookies(txtPath)) {
                 USE_COOKIES = true;
                 saveConfig();
-                printColor("[OK] Cookies updated successfully!", GREEN);
+                printColor(tr("[OK] Cookies updated successfully!", "[OK] Куки успешно обновлены!"), GREEN);
                 waitForKey();
                 return fromSettings ? "settings" : "continue";
             }
-            printColor("[INFO] No valid cookies saved.", YELLOW);
+            printColor(tr("[INFO] No valid cookies saved.", "[ИНФО] Допустимые куки не сохранены."), YELLOW);
             waitForKey();
             break;
         }
@@ -734,7 +821,7 @@ string cookieEditor(bool fromSettings = false) {
             fs::remove(fs::u8path(CONFIG_PATH + "cookies.dat"), ec);
             USE_COOKIES = false;
             saveConfig();
-            printColor("[OK] Saved cookies removed!", GREEN);
+            printColor(tr("[OK] Saved cookies removed!", "[OK] Сохранённые куки удалены!"), GREEN);
             waitForKey();
             break;
         }
@@ -1053,7 +1140,7 @@ bool execWithProgress(const wstring& cmdLine) {
                     }
                     else if (line.find("has already been recorded in the archive") != string::npos) {
                         if (progressActive) { cout << endl; progressActive = false; }
-                        printColor("[INFO] Video already downloaded (in archive, skipping).", GREEN);
+                        printColor(tr("[INFO] Video already downloaded (in archive, skipping).", "[ИНФО] Видео уже скачано (в архиве, пропуск)."), GREEN);
                         currentVideoCompleted = true;
                     }
                     else if (line.find("[download] Destination:") == 0) {
@@ -1099,19 +1186,19 @@ bool execWithProgress(const wstring& cmdLine) {
                         if (progressActive) { cout << endl; progressActive = false; }
 
                         bool isAudio = isAudioStream(path, ext);
-                        string mediaType = isAudio ? "Audio" : "Video";
+                        string mediaType = isAudio ? tr("Audio", "Аудио") : tr("Video", "Видео");
 
                         if (totalItems > 0)
-                            printColor("Downloading " + mediaType + " " + to_string(curItem) + " of " + to_string(totalItems) + " - " + name, CYAN);
+                            printColor(tr("Downloading ", "Скачивание ") + mediaType + " " + to_string(curItem) + tr(" of ", " из ") + to_string(totalItems) + " - " + name, CYAN);
                         else
-                            printColor("Downloading " + mediaType + " into \"" + path + "\"", CYAN);
+                            printColor(tr("Downloading ", "Скачивание ") + mediaType + tr(" into \"", " в \"") + path + "\"", CYAN);
                     }
                     else if (line.find("[Merger] Merging formats into") == 0) {
                         if (progressActive) { cout << endl; progressActive = false; }
                         string path = line.substr(string("[Merger] Merging formats into").length());
                         while (!path.empty() && path.front() == ' ') path.erase(path.begin());
                         if (!path.empty() && path.back() == '"') path.pop_back();
-                        printColor("[Merger] Merging video and audio into \"" + path + "\"", CYAN);
+                        printColor(tr("[Merger] Merging video and audio into \"", "[Слияние] Объединение видео и аудио в \"") + path + "\"", CYAN);
                         currentVideoCompleted = true;
                     }
                     else if (parseDownloadLine(line, percent, speed, eta)) {
@@ -1213,7 +1300,7 @@ bool execWithProgress(const wstring& cmdLine) {
 
     // Manual FFmpeg merge fallback if required
     if (mergeFailed && !mergeErrorPath.empty() && FFMPEG_FOUND && !FFMPEG_PATH.empty()) {
-        printColor("\n[INFO] Merge failed. Trying manual FFmpeg merge...", YELLOW);
+        printColor(tr("\n[INFO] Merge failed. Trying manual FFmpeg merge...", "\n[ИНФО] Ошибка слияния. Попытка ручного слияния через FFmpeg..."), YELLOW);
 
         string dir = mergeErrorPath.substr(0, mergeErrorPath.find_last_of("\\/") + 1);
         string baseName = mergeErrorPath.substr(mergeErrorPath.find_last_of("\\/") + 1);
@@ -1244,21 +1331,21 @@ bool execWithProgress(const wstring& cmdLine) {
             string outputFile = dir + baseName + "_merged.mp4";
             string mergeCmd = "\"" + FFMPEG_PATH + "\" -i \"" + videoFile + "\" -i \"" + audioFile + "\" -c:v copy -c:a aac -y \"" + outputFile + "\"";
 
-            printColor("[INFO] Running manual merge: " + mergeCmd, CYAN);
+            printColor(tr("[INFO] Running manual merge: ", "[ИНФО] Запуск ручного слияния: ") + mergeCmd, CYAN);
             int mergeResult = execCmd(mergeCmd);
 
             if (mergeResult == 0) {
-                printColor("[OK] Manual merge successful!", GREEN);
+                printColor(tr("[OK] Manual merge successful!", "[OK] Ручное слияние успешно завершено!"), GREEN);
                 std::error_code ec;
                 fs::remove(fs::u8path(videoFile), ec);
                 fs::remove(fs::u8path(audioFile), ec);
                 string finalFile = dir + baseName + ".mp4";
                 fs::rename(fs::u8path(outputFile), fs::u8path(finalFile), ec);
                 if (ec) {
-                    printColor("[WARNING] Merged file created as: " + outputFile, YELLOW);
+                    printColor(tr("[WARNING] Merged file created as: ", "[ПРЕДУПРЕЖДЕНИЕ] Объединённый файл создан как: ") + outputFile, YELLOW);
                 }
                 else {
-                    printColor("[OK] Final file: " + finalFile, GREEN);
+                    printColor(tr("[OK] Final file: ", "[OK] Итоговый файл: ") + finalFile, GREEN);
                 }
                 return true;
             }
@@ -1379,12 +1466,12 @@ void startDownload(const string& url = "", const string& start = "", const strin
             cout << "\n";
         }
         printColor("============================================", CYAN);
-        printColor(retry ? " RETRYING DOWNLOAD" : " STARTING DOWNLOAD", CYAN);
+        printColor(retry ? tr(" RETRYING DOWNLOAD", " ПОВТОРНАЯ ПОПЫТКА СКАЧИВАНИЯ") : tr(" STARTING DOWNLOAD", " НАЧАЛО СКАЧИВАНИЯ"), CYAN);
         printColor("============================================", CYAN);
-        cout << "\nEnter URL (Paste: Ctrl+V, Cancel: ESC):\n";
+        cout << "\n" << tr("Enter URL (Paste: Ctrl+V, Cancel: ESC):\n", "Введите URL (Вставка: Ctrl+V, Отмена: ESC):\n");
 
         if (!inputLineWithEscape(u, "> ")) {
-            printColor("\n[INFO] Cancelled", YELLOW);
+            printColor("\n" + tr("[INFO] Cancelled", "[ИНФО] Отменено"), YELLOW);
             waitForKey();
             return;
         }
@@ -1394,7 +1481,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
         while (!u.empty() && (u.back() == ' ' || u.back() == '"' || u.back() == '\'')) u.pop_back();
 
         if (u.empty()) {
-            printColor("[ERROR] URL cannot be empty!", RED);
+            printColor(tr("[ERROR] URL cannot be empty!", "[ОШИБКА] URL не может быть пустым!"), RED);
             waitForKey();
             return;
         }
@@ -1403,12 +1490,15 @@ void startDownload(const string& url = "", const string& start = "", const strin
         if (u.find("&list=") != string::npos && u.find("/playlist?list=") == string::npos) {
             clearScreen();
             printColor("============================================", CYAN);
-            printColor(" URL contains both a video and a playlist:", CYAN);
+            printColor(tr(" URL contains both a video and a playlist:", " URL содержит и видео, и плейлист:"), CYAN);
             printColor("============================================", CYAN);
-            cout << "\n1. Download entire playlist\n2. Download only this video\n0. Cancel (ESC)\n\nYour choice: ";
+            cout << "\n1. " << tr("Download entire playlist", "Скачать весь плейлист")
+                << "\n2. " << tr("Download only this video", "Скачать только это видео")
+                << "\n0. " << tr("Cancel (ESC)", "Отмена (ESC)")
+                << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
             char plChoice = getMenuChoice();
             if (plChoice == 27 || plChoice == '0') {
-                printColor("\n[INFO] Cancelled", YELLOW);
+                printColor("\n" + tr("[INFO] Cancelled", "[ИНФО] Отменено"), YELLOW);
                 waitForKey();
                 return;
             }
@@ -1431,17 +1521,17 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
         if (isPl) {
             string inp;
-            cout << "\nStart index in playlist (Enter=first, ESC to skip):\n";
-            if (!inputLineWithEscape(inp, "Your choice: ")) {
-                cout << "[INFO] Defaulting to start\n";
+            cout << "\n" << tr("Start index in playlist (Enter=first, ESC to skip):\n", "Начальный номер в плейлисте (Enter=с начала, ESC=пропустить):\n");
+            if (!inputLineWithEscape(inp, tr("Your choice: ", "Ваш выбор: "))) {
+                cout << tr("[INFO] Defaulting to start\n", "[ИНФО] Выбрано начало плейлиста\n");
             }
             else if (!inp.empty()) {
                 s = inp;
             }
 
-            cout << "\nEnd index in playlist (Enter=last, ESC to skip):\n";
-            if (!inputLineWithEscape(inp, "Your choice: ")) {
-                cout << "[INFO] Defaulting to end\n";
+            cout << "\n" << tr("End index in playlist (Enter=last, ESC to skip):\n", "Конечный номер в плейлисте (Enter=до конца, ESC=пропустить):\n");
+            if (!inputLineWithEscape(inp, tr("Your choice: ", "Ваш выбор: "))) {
+                cout << tr("[INFO] Defaulting to end\n", "[ИНФО] Выбран конец плейлиста\n");
             }
             else if (!inp.empty()) {
                 e = inp;
@@ -1468,7 +1558,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
     }
 
     printColor("============================================", CYAN);
-    printColor(retry ? " RETRYING DOWNLOAD..." : " STARTING DOWNLOAD...", CYAN);
+    printColor(retry ? tr(" RETRYING DOWNLOAD...", " ПОВТОРНАЯ ПОПЫТКА СКАЧИВАНИЯ...") : tr(" STARTING DOWNLOAD...", " НАЧАЛО СКАЧИВАНИЯ..."), CYAN);
     printColor("============================================", CYAN);
     cout << endl;
 
@@ -1482,7 +1572,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
     if (LAST_ERROR == RATE_LIMIT_ERROR) {
         printColor("\n============================================", RED);
-        printColor("[ERROR] YouTube rate-limited requests. Waiting up to 1h (ESC to cancel)...", RED);
+        printColor(tr("[ERROR] YouTube rate-limited requests. Waiting up to 1h (ESC to cancel)...", "[ОШИБКА] Превышен лимит запросов YouTube. Ожидание до 1 часа (ESC для отмены)..."), RED);
         printColor("============================================", RED);
 
         bool cancelled = false;
@@ -1490,18 +1580,18 @@ void startDownload(const string& url = "", const string& start = "", const strin
             if (_kbhit() && _getch() == 27) cancelled = true;
             else Sleep(1000);
             if (sec > 0 && sec % 300 == 0)
-                printColor("[INFO] ~" + to_string((3660 - sec) / 60) + " min remaining (ESC to cancel)", YELLOW);
+                printColor(tr("[INFO] ~", "[ИНФО] ~") + to_string((3660 - sec) / 60) + tr(" min remaining (ESC to cancel)", " мин осталось (ESC для отмены)"), YELLOW);
         }
 
         LAST_ERROR = NOT_ERROR;
         if (cancelled) {
-            printColor("[INFO] Cancelled by user.", YELLOW);
+            printColor(tr("[INFO] Cancelled by user.", "[ИНФО] Отменено пользователем."), YELLOW);
             waitForKey();
             return;
         }
 
         printColor("============================================", CYAN);
-        printColor("[INFO] Rate-limit cooldown complete. Continuing download...", CYAN);
+        printColor(tr("[INFO] Rate-limit cooldown complete. Continuing download...", "[ИНФО] Период ограничения завершён. Продолжение скачивания..."), CYAN);
         printColor("============================================", CYAN);
 
         if (isPl) {
@@ -1524,19 +1614,21 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
         printColor("============================================", RED);
         if (LAST_ERROR == COOKIE_ERROR) {
-            printColor("[ERROR] YouTube requires verification (Bot check / Login required)!", RED);
-            printColor("[ERROR] Please update cookies or use an account cookie file.", RED);
+            printColor(tr("[ERROR] YouTube requires verification (Bot check / Login required)!", "[ОШИБКА] YouTube требует подтверждения (Проверка на бота / Требуется вход)!"), RED);
+            printColor(tr("[ERROR] Please update cookies or use an account cookie file.", "[ОШИБКА] Пожалуйста, обновите куки или используйте файл куки аккаунта."), RED);
         }
         else {
-            printColor("[ERROR] This video has age restriction!", YELLOW);
-            printColor("[ERROR] Please use account cookies that can access this video.", YELLOW);
+            printColor(tr("[ERROR] This video has age restriction!", "[ОШИБКА] Это видео имеет возрастное ограничение!"), YELLOW);
+            printColor(tr("[ERROR] Please use account cookies that can access this video.", "[ОШИБКА] Пожалуйста, используйте куки аккаунта с доступом к этому видео."), YELLOW);
         }
         printColor("============================================", RED);
 
         printColor("\n============================================", YELLOW);
-        printColor("[INFO] Please update your cookies to continue.", YELLOW);
+        printColor(tr("[INFO] Please update your cookies to continue.", "[ИНФО] Пожалуйста, обновите куки для продолжения."), YELLOW);
         printColor("============================================", YELLOW);
-        cout << "\n1 - Update cookies\n0 - Main menu (ESC)\nYour choice: ";
+        cout << "\n1 - " << tr("Update cookies", "Обновить куки")
+            << "\n0 - " << tr("Main menu (ESC)", "Главное меню (ESC)")
+            << "\n" << tr("Your choice: ", "Ваш выбор: ");
         char ch = getMenuChoice();
         if (ch == 27 || ch == '0') {
             cout << "ESC" << endl;
@@ -1585,11 +1677,11 @@ void startDownload(const string& url = "", const string& start = "", const strin
 
             if (isLastVideo) {
                 printColor("============================================", GREEN);
-                printColor("[OK] Playlist processing completed!", GREEN);
+                printColor(tr("[OK] Playlist processing completed!", "[OK] Обработка плейлиста завершена!"), GREEN);
                 printColor("============================================", GREEN);
                 if (!skippedVideos.empty()) {
                     printColor("\n============================================", YELLOW);
-                    printColor("[INFO] Skipped items in this session:", YELLOW);
+                    printColor(tr("[INFO] Skipped items in this session:", "[ИНФО] Пропущенные элементы в этой сессии:"), YELLOW);
                     for (const string& vid : skippedVideos) {
                         printColor("  - " + vid, YELLOW);
                     }
@@ -1603,7 +1695,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
             }
 
             printColor("============================================", RED);
-            printColor("[INFO] Video " + to_string(currentIndex) + " is a scheduled live stream. Skipping...", YELLOW);
+            printColor(tr("[INFO] Video ", "[ИНФО] Видео ") + to_string(currentIndex) + tr(" is a scheduled live stream. Skipping...", " является запланированной трансляцией. Пропуск..."), YELLOW);
             printColor("============================================", RED);
             Sleep(2000);
 
@@ -1613,7 +1705,7 @@ void startDownload(const string& url = "", const string& start = "", const strin
         }
         else {
             printColor("============================================", RED);
-            printColor("[ERROR] This video is a live stream that has not started yet.", RED);
+            printColor(tr("[ERROR] This video is a live stream that has not started yet.", "[ОШИБКА] Это видео является трансляцией, которая ещё не началась."), RED);
             printColor("============================================", RED);
             waitForKey();
             LAST_ERROR = NOT_ERROR;
@@ -1640,11 +1732,11 @@ void startDownload(const string& url = "", const string& start = "", const strin
         }
 
         if (isLastVideo) {
-            printColor("\n[INFO] Reached end of playlist range.", YELLOW);
-            printColor("[OK] Download finished!", GREEN);
+            printColor("\n" + tr("[INFO] Reached end of playlist range.", "[ИНФО] Достигнут конец диапазона плейлиста."), YELLOW);
+            printColor(tr("[OK] Download finished!", "[OK] Скачивание завершено!"), GREEN);
             if (!skippedVideos.empty()) {
                 printColor("\n============================================", YELLOW);
-                printColor("[INFO] Skipped items:", YELLOW);
+                printColor(tr("[INFO] Skipped items:", "[ИНФО] Пропущенные элементы:"), YELLOW);
                 for (const string& vid : skippedVideos) {
                     printColor("  - " + vid, YELLOW);
                 }
@@ -1658,14 +1750,14 @@ void startDownload(const string& url = "", const string& start = "", const strin
         }
 
         if (LAST_ERROR == VIDEO_ERROR) {
-            string skippedVideo = "Item " + to_string(currentIndex);
+            string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex);
             skippedVideos.push_back(skippedVideo);
         }
 
         printColor("\n============================================", RED);
-        printColor("[ERROR] Video " + to_string(currentIndex) + " could not be downloaded (skipping).", RED);
+        printColor(tr("[ERROR] Video ", "[ОШИБКА] Видео ") + to_string(currentIndex) + tr(" could not be downloaded (skipping).", " не удалось скачать (пропуск)."), RED);
         printColor("============================================", RED);
-        printColor("\n[INFO] Continuing with next item in 3 seconds...\n", CYAN);
+        printColor("\n" + tr("[INFO] Continuing with next item in 3 seconds...\n", "[ИНФО] Продолжение со следующим элементом через 3 секунды...\n"), CYAN);
         Sleep(3000);
         LAST_ERROR = NOT_ERROR;
         startDownload(u, nextStart, e, true, true);
@@ -1675,14 +1767,17 @@ void startDownload(const string& url = "", const string& start = "", const strin
     // ========== SINGLE VIDEO - ERRORS ==========
     if (!ok) {
         printColor("\n============================================", RED);
-        printColor("[ERROR] Download could not be completed!", RED);
+        printColor(tr("[ERROR] Download could not be completed!", "[ОШИБКА] Не удалось завершить скачивание!"), RED);
         printColor("============================================", RED);
-        printColor("\nPossible reasons:", RED);
-        printColor("  - Expired / missing cookies (Login required)", RED);
-        printColor("  - Region block or Private / Deleted video", RED);
-        printColor("  - Network connection issues", RED);
-        printColor("  - YouTube changed internal player algorithms", RED);
-        cout << "\n1 - Update cookies\n2 - Try updating yt-dlp\n0 - Main menu (ESC)\nYour choice: ";
+        printColor("\n" + tr("Possible reasons:", "Возможные причины:"), RED);
+        printColor(tr("  - Expired / missing cookies (Login required)", "  - Истёкшие или отсутствующие куки (Требуется вход)"), RED);
+        printColor(tr("  - Region block or Private / Deleted video", "  - Региональная блокировка или приватное / удалённое видео"), RED);
+        printColor(tr("  - Network connection issues", "  - Проблемы с сетевым подключением"), RED);
+        printColor(tr("  - YouTube changed internal player algorithms", "  - YouTube изменил внутренние алгоритмы плеера"), RED);
+        cout << "\n1 - " << tr("Update cookies", "Обновить куки")
+            << "\n2 - " << tr("Try updating yt-dlp", "Попробовать обновить yt-dlp")
+            << "\n0 - " << tr("Main menu (ESC)", "Главное меню (ESC)")
+            << "\n" << tr("Your choice: ", "Ваш выбор: ");
         char ch = getMenuChoice();
         if (ch == 27 || ch == '0') {
             cout << "ESC" << endl;
@@ -1701,15 +1796,15 @@ void startDownload(const string& url = "", const string& start = "", const strin
             }
         }
         else if (ch == '2') {
-            printColor("\n[INFO] Downloading latest yt-dlp...", CYAN);
+            printColor("\n" + tr("[INFO] Downloading latest yt-dlp...", "[ИНФО] Загрузка последней версии yt-dlp..."), CYAN);
             string destExe = CONFIG_PATH + "yt-dlp.exe";
             if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", destExe, "yt-dlp")) {
                 YTDLP_FOUND = fileExists(destExe);
                 YTDLP_PATH = destExe;
-                printColor("\n[OK] yt-dlp updated successfully! Retrying download...", GREEN);
+                printColor("\n" + tr("[OK] yt-dlp updated successfully! Retrying download...", "[OK] yt-dlp успешно обновлен! Повторная попытка..."), GREEN);
             }
             else {
-                printColor("\n[ERROR] Failed to update yt-dlp.", RED);
+                printColor("\n" + tr("[ERROR] Failed to update yt-dlp.", "[ОШИБКА] Не удалось обновить yt-dlp."), RED);
             }
             Sleep(1500);
             LAST_ERROR = NOT_ERROR;
@@ -1724,31 +1819,51 @@ void startDownload(const string& url = "", const string& start = "", const strin
         LAST_ERROR = NOT_ERROR;
         cookieErrorHandled = false;
         printColor("============================================", GREEN);
-        printColor("[OK] Download completed successfully!", GREEN);
+        printColor(tr("[OK] Download completed successfully!", "[OK] Скачивание успешно завершено!"), GREEN);
         printColor("============================================", GREEN);
         waitForKey();
     }
 }
 
 // ========== SETTINGS MENUS ==========
+int arrowSelect(const string& title, const string& description, const vector<string>& options, int currentIdx, const vector<string>& hints = {});
+
 void codecRecompilerMenu() {
-    clearScreen();
-    printColor("========================================", CYAN);
-    printColor(" CODEC RECOMPILER", CYAN);
-    printColor("========================================", CYAN);
-    cout << "\nStatus: [" << (CODEC_RECOMPILER ? "ENABLED" : "DISABLED") << "]\n";
-    cout << "\nWhen enabled, yt-dlp and FFmpeg re-encode downloaded videos";
-    cout << "\n(including 4K/VP9/AV1) into universal H.264 + AAC MP4 container.";
-    cout << "\nThis ensures maximum compatibility with older TVs and players.\n";
-    cout << "\n1. Toggle ON/OFF\n0. Return (ESC)\n\nYour choice: ";
-    char ch = getMenuChoice();
-    if (ch == 27 || ch == '0') {
-        return;
-    }
-    if (ch == '1') {
-        CODEC_RECOMPILER = !CODEC_RECOMPILER;
+    string status = tr("Status: [", "Статус: [") +
+                    (CODEC_RECOMPILER ? tr("ENABLED", "ВКЛЮЧЕНО") : tr("DISABLED", "ВЫКЛЮЧЕНО")) + "]";
+    string desc = "\n" + status + "\n\n" +
+                  tr("When enabled, yt-dlp and FFmpeg re-encode downloaded videos",
+                     "Когда включено, yt-dlp и FFmpeg перекодируют скачанные видео") + "\n" +
+                  tr("(including 4K/VP9/AV1) into universal H.264 + AAC MP4 container.",
+                     "(включая 4K/VP9/AV1) в универсальный MP4-контейнер H.264 + AAC.") + "\n" +
+                  tr("This ensures maximum compatibility with older TVs and players.",
+                     "Это обеспечивает максимальную совместимость со старыми ТВ и плеерами.");
+
+    vector<string> options = {
+        tr("[ON] - Re-encode to H.264 MP4", "[ВКЛ] - Перекодировать в H.264 MP4"),
+        tr("[OFF] - No re-encoding (default)", "[ВЫКЛ] - Без перекодирования (по умолчанию)")
+    };
+
+    vector<string> hints = {
+        tr("Videos will be re-encoded for maximum device compatibility",
+           "Видео будут перекодированы для максимальной совместимости с устройствами"),
+        tr("Original video format is preserved",
+           "Оригинальный формат видео сохраняется")
+    };
+
+    int sel = arrowSelect(
+        tr("CODEC RECOMPILER", "ПЕРЕКОДИРОВЩИК КОДЕКОВ"),
+        desc,
+        options,
+        CODEC_RECOMPILER ? 0 : 1,
+        hints
+    );
+
+    if (sel >= 0) {
+        CODEC_RECOMPILER = (sel == 0);
         saveConfig();
-        printColor("\n[OK] Codec recompiler is now " + string(CODEC_RECOMPILER ? "ON" : "OFF"), GREEN);
+        printColor("\n" + tr("[OK] Codec recompiler is now ", "[OK] Перекодировщик кодеков теперь ") +
+                   (CODEC_RECOMPILER ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")), GREEN);
         waitForKey();
     }
 }
@@ -1756,9 +1871,9 @@ void codecRecompilerMenu() {
 void selectVideoQuality() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" Select video resolution", CYAN);
+    printColor(tr(" Select video resolution", " Выберите разрешение видео"), CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) 2160p (4k)\n2) 1440p (2k)\n3) 1080p (FullHD)\n4) 720p (HD)\n5) 480p\n6) 360p\n0) Cancel (ESC)\n\nYour choice: ";
+    cout << "\n1) 2160p (4k)\n2) 1440p (2k)\n3) 1080p (FullHD)\n4) 720p (HD)\n5) 480p\n6) 360p\n0) " << tr("Cancel (ESC)", "Отмена (ESC)") << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
     char ch = getMenuChoice();
     if (ch == 27 || ch == '0') return;
     cout << ch << endl;
@@ -1769,28 +1884,28 @@ void selectVideoQuality() {
     case '4': VIDEO_RESOLUTION = "720"; break;
     case '5': VIDEO_RESOLUTION = "480"; break;
     case '6': VIDEO_RESOLUTION = "360"; break;
-    default: printColor("[ERROR] Invalid choice!", RED); waitForKey(); return;
+    default: printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED); waitForKey(); return;
     }
 
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" Select frame rate", CYAN);
+    printColor(tr(" Select frame rate", " Выберите частоту кадров"), CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) 60fps (or best)\n2) 30fps\n0) Cancel (ESC)\n\nYour choice: ";
+    cout << "\n1) " << tr("60fps (or best)", "60 кадр/с (или лучшая)") << "\n2) " << tr("30fps", "30 кадр/с") << "\n0) " << tr("Cancel (ESC)", "Отмена (ESC)") << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
     ch = getMenuChoice();
     if (ch == 27 || ch == '0') return;
     cout << ch << endl;
     switch (ch) {
     case '1': VIDEO_FPS = "60"; break;
     case '2': VIDEO_FPS = "30"; break;
-    default: printColor("[ERROR] Invalid choice!", RED); waitForKey(); return;
+    default: printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED); waitForKey(); return;
     }
 
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" Select video format", CYAN);
+    printColor(tr(" Select video format", " Выберите видеоформат"), CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) MP4(H.264)\n2) MP4(AV1)\n3) WEBM(AV1)\n4) WEBM(VP9)\n0) Cancel (ESC)\n\nYour choice: ";
+    cout << "\n1) MP4(H.264)\n2) MP4(AV1)\n3) WEBM(AV1)\n4) WEBM(VP9)\n0) " << tr("Cancel (ESC)", "Отмена (ESC)") << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
     ch = getMenuChoice();
     if (ch == 27 || ch == '0') return;
     cout << ch << endl;
@@ -1799,19 +1914,19 @@ void selectVideoQuality() {
     case '2': VIDEO_FORMAT = "MP4(AV1)"; break;
     case '3': VIDEO_FORMAT = "WEBM(AV1)"; break;
     case '4': VIDEO_FORMAT = "WEBM(VP9)"; break;
-    default: printColor("[ERROR] Invalid choice!", RED); waitForKey(); return;
+    default: printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED); waitForKey(); return;
     }
     saveConfig();
-    printColor("[OK] Video settings updated!", GREEN);
+    printColor(tr("[OK] Video settings updated!", "[OK] Настройки видео обновлены!"), GREEN);
     waitForKey();
 }
 
 void selectAudioQuality() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" Select audio format", CYAN);
+    printColor(tr(" Select audio format", " Выберите аудиоформат"), CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1) M4A(AAC)\n2) WEBM(Opus)\n3) WEBM(Vorbis)\n0) Cancel (ESC)\n\nYour choice: ";
+    cout << "\n1) M4A(AAC)\n2) WEBM(Opus)\n3) WEBM(Vorbis)\n0) " << tr("Cancel (ESC)", "Отмена (ESC)") << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
     char ch = getMenuChoice();
     if (ch == 27 || ch == '0') return;
     cout << ch << endl;
@@ -1819,10 +1934,10 @@ void selectAudioQuality() {
     case '1': AUDIO_FORMAT = "M4A(AAC)"; break;
     case '2': AUDIO_FORMAT = "WEBM(Opus)"; break;
     case '3': AUDIO_FORMAT = "WEBM(Vorbis)"; break;
-    default: printColor("[ERROR] Invalid choice!", RED); waitForKey(); return;
+    default: printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED); waitForKey(); return;
     }
     saveConfig();
-    printColor("[OK] Audio format updated!", GREEN);
+    printColor(tr("[OK] Audio format updated!", "[OK] Аудиоформат обновлен!"), GREEN);
     waitForKey();
 }
 
@@ -1842,9 +1957,13 @@ void toggleOnlyVideo() {
 void updateComponentsMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" COMPONENT UPDATER", CYAN);
+    printColor(tr(" COMPONENT UPDATER", " ОБНОВЛЕНИЕ КОМПОНЕНТОВ"), CYAN);
     printColor("========================================", CYAN);
-    cout << "\n1. Update yt-dlp (yt-dlp -U)\n2. Re-download FFmpeg\n3. Re-download QuickJS\n0. Return (ESC)\n\nYour choice: ";
+    cout << "\n1. " << tr("Update yt-dlp (yt-dlp -U)", "Обновить yt-dlp (yt-dlp -U)")
+        << "\n2. " << tr("Re-download FFmpeg", "Перескачать FFmpeg")
+        << "\n3. " << tr("Re-download QuickJS", "Перескачать QuickJS")
+        << "\n0. " << tr("Return (ESC)", "Назад (ESC)")
+        << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
     char ch = getMenuChoice();
     if (ch == 27 || ch == '0') {
         return;
@@ -1852,82 +1971,82 @@ void updateComponentsMenu() {
     if (ch == '1') {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" Downloading latest yt-dlp (~20MB)...", CYAN);
+        printColor(tr(" Downloading latest yt-dlp (~20MB)...", " Загрузка последней версии yt-dlp (~20MB)..."), CYAN);
         printColor("========================================", CYAN);
         string destExe = CONFIG_PATH + "yt-dlp.exe";
         if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", destExe, "yt-dlp")) {
             YTDLP_FOUND = fileExists(destExe);
             YTDLP_PATH = destExe;
-            printColor("\n[OK] yt-dlp updated successfully!", GREEN);
+            printColor("\n" + tr("[OK] yt-dlp updated successfully!", "[OK] yt-dlp успешно обновлен!"), GREEN);
         }
         else {
-            printColor("\n[ERROR] Failed to update yt-dlp!", RED);
+            printColor("\n" + tr("[ERROR] Failed to update yt-dlp!", "[ОШИБКА] Не удалось обновить yt-dlp!"), RED);
         }
         waitForKey();
     }
     else if (ch == '2') {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" Downloading latest FFmpeg (~160MB)...", CYAN);
+        printColor(tr(" Downloading latest FFmpeg (~160MB)...", " Загрузка последней версии FFmpeg (~160MB)..."), CYAN);
         printColor("========================================", CYAN);
         string zipFile = CONFIG_PATH + "ffmpeg.zip";
         if (downloadFile("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", zipFile, "FFmpeg")) {
-            printComponentProgress("FFmpeg", 100.0, "Extracting components...");
+            printComponentProgress("FFmpeg", 100.0, tr("Extracting components...", "Распаковка компонентов..."));
             if (extractZip(zipFile, CONFIG_PATH)) {
                 organizeExtractedTool("ffmpeg.exe", CONFIG_PATH);
                 FFMPEG_FOUND = fileExists(CONFIG_PATH + "ffmpeg.exe");
                 if (FFMPEG_FOUND) {
                     FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
                     cout << "\n";
-                    printColor("[OK] FFmpeg updated successfully!", GREEN);
+                    printColor(tr("[OK] FFmpeg updated successfully!", "[OK] FFmpeg успешно обновлен!"), GREEN);
                 }
                 else {
                     cout << "\n";
-                    printColor("[ERROR] Failed to locate ffmpeg.exe after extraction!", RED);
+                    printColor(tr("[ERROR] Failed to locate ffmpeg.exe after extraction!", "[ОШИБКА] Не удалось найти ffmpeg.exe после распаковки!"), RED);
                 }
             }
             else {
                 cout << "\n";
-                printColor("[ERROR] Failed to extract FFmpeg archive!", RED);
+                printColor(tr("[ERROR] Failed to extract FFmpeg archive!", "[ОШИБКА] Не удалось распаковать архив FFmpeg!"), RED);
             }
             std::error_code ec;
             fs::remove(fs::u8path(zipFile), ec);
         }
         else {
-            printColor("[ERROR] Failed to download FFmpeg!", RED);
+            printColor(tr("[ERROR] Failed to download FFmpeg!", "[ОШИБКА] Не удалось скачать FFmpeg!"), RED);
         }
         waitForKey();
     }
     else if (ch == '3') {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" Downloading QuickJS (~1MB)...", CYAN);
+        printColor(tr(" Downloading QuickJS (~1MB)...", " Загрузка QuickJS (~1MB)..."), CYAN);
         printColor("========================================", CYAN);
         string zipFile = CONFIG_PATH + "quickjs.zip";
         if (downloadFile("https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip", zipFile, "QuickJS")) {
-            printComponentProgress("QuickJS", 100.0, "Extracting components...");
+            printComponentProgress("QuickJS", 100.0, tr("Extracting components...", "Распаковка компонентов..."));
             if (extractZip(zipFile, CONFIG_PATH)) {
                 organizeExtractedTool("qjs.exe", CONFIG_PATH);
                 QJS_FOUND = fileExists(CONFIG_PATH + "qjs.exe");
                 if (QJS_FOUND) {
                     QJS_PATH = CONFIG_PATH + "qjs.exe";
                     cout << "\n";
-                    printColor("[OK] QuickJS updated successfully!", GREEN);
+                    printColor(tr("[OK] QuickJS updated successfully!", "[OK] QuickJS успешно обновлен!"), GREEN);
                 }
                 else {
                     cout << "\n";
-                    printColor("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", YELLOW);
+                    printColor(tr("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось найти qjs.exe в архиве (QuickJS необязателен)."), YELLOW);
                 }
             }
             else {
                 cout << "\n";
-                printColor("[WARNING] Failed to extract QuickJS archive.", YELLOW);
+                printColor(tr("[WARNING] Failed to extract QuickJS archive.", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось распаковать архив QuickJS."), YELLOW);
             }
             std::error_code ec;
             fs::remove(fs::u8path(zipFile), ec);
         }
         else {
-            printColor("[WARNING] Failed to download QuickJS (QuickJS is optional).", YELLOW);
+            printColor(tr("[WARNING] Failed to download QuickJS (QuickJS is optional).", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать QuickJS (QuickJS необязателен)."), YELLOW);
         }
         waitForKey();
     }
@@ -1941,23 +2060,23 @@ void toggleUseArchive() {
 void clearArchiveMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" CLEAR DOWNLOAD ARCHIVE HISTORY", CYAN);
+    printColor(tr(" CLEAR DOWNLOAD ARCHIVE HISTORY", " ОЧИСТКА ИСТОРИИ ЗАГРУЗОК (АРХИВА)"), CYAN);
     printColor("========================================", CYAN);
     string arcPath = getArchivePath();
     if (!fileExists(arcPath)) {
-        printColor("\n[INFO] Download archive is already empty.", YELLOW);
+        printColor("\n" + tr("[INFO] Download archive is already empty.", "[ИНФО] Архив загрузок уже пуст."), YELLOW);
         waitForKey();
         return;
     }
-    cout << "\nAre you sure you want to clear the download history archive? (y/n): ";
+    cout << "\n" << tr("Are you sure you want to clear the download history archive? (y/n): ", "Вы уверены, что хотите очистить архив истории загрузок? (y/n): ");
     char ch = getMenuChoice();
     if (ch == 'y' || ch == 'Y') {
         std::error_code ec;
         fs::remove(fs::u8path(arcPath), ec);
-        printColor("\n[OK] Download archive history cleared successfully!", GREEN);
+        printColor("\n" + tr("[OK] Download archive history cleared successfully!", "[OK] История загрузок успешно очищена!"), GREEN);
     }
     else {
-        printColor("\n[INFO] Cancelled.", YELLOW);
+        printColor("\n" + tr("[INFO] Cancelled.", "[ИНФО] Отменено."), YELLOW);
     }
     waitForKey();
 }
@@ -1967,19 +2086,20 @@ void settingsMenu() {
     while (true) {
         clearScreen();
         printColor("========================================", CYAN);
-        printColor(" SETTINGS", CYAN);
+        printColor(tr(" SETTINGS", " НАСТРОЙКИ"), CYAN);
         printColor("========================================", CYAN);
-        cout << "\n1. Download location: [" << DOWNLOAD_PATH << "]"
-            << "\n2. Video quality: [" << VIDEO_RESOLUTION << "p " << VIDEO_FPS << "fps " << VIDEO_FORMAT << "]"
-            << "\n3. Audio quality: [" << AUDIO_FORMAT << "]"
-            << "\n4. Codec recompiler: [" << (CODEC_RECOMPILER ? "ON" : "OFF") << "]"
-            << "\n5. Skip already downloaded (archive): [" << (USE_ARCHIVE ? "ON" : "OFF") << "]"
-            << "\n6. Only audio: [" << (ONLY_AUDIO ? "ON" : "OFF") << "]"
-            << "\n7. Only video: [" << (ONLY_VIDEO ? "ON" : "OFF") << "]"
-            << "\n8. Clear download history (archive)"
-            << "\n9. Update cookies"
-            << "\nu. Update yt-dlp & components"
-            << "\n0. Return (ESC)\n\nYour choice: ";
+        cout << "\n1. " << tr("Download location: [", "Папка для скачивания: [") << DOWNLOAD_PATH << "]"
+            << "\n2. " << tr("Video quality: [", "Качество видео: [") << VIDEO_RESOLUTION << "p " << VIDEO_FPS << "fps " << VIDEO_FORMAT << "]"
+            << "\n3. " << tr("Audio quality: [", "Качество аудио: [") << AUDIO_FORMAT << "]"
+            << "\n4. " << tr("Codec recompiler: [", "Перекодировщик кодеков: [") << (CODEC_RECOMPILER ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) << "]"
+            << "\n5. " << tr("Skip already downloaded (archive): [", "Пропускать уже скачанное (архив): [") << (USE_ARCHIVE ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) << "]"
+            << "\n6. " << tr("Only audio: [", "Только аудио: [") << (ONLY_AUDIO ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) << "]"
+            << "\n7. " << tr("Only video: [", "Только видео: [") << (ONLY_VIDEO ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) << "]"
+            << "\n8. " << tr("Clear download history (archive)", "Очистить историю загрузок (архив)")
+            << "\n9. " << tr("Update cookies", "Обновить куки")
+            << "\nu. " << tr("Update yt-dlp & components", "Обновить yt-dlp и компоненты")
+            << "\n0. " << tr("Return (ESC)", "Назад (ESC)")
+            << "\n\n" << tr("Your choice: ", "Ваш выбор: ");
         char ch = getMenuChoice();
         if (ch == 27 || ch == '0') {
             return;
@@ -1987,15 +2107,16 @@ void settingsMenu() {
         cout << ch << endl;
         switch (ch) {
         case '1': {
-            string p = openFolderDialog();
+            wstring folderTitle = (CURRENT_LANG == LANG_RU) ? L"Выберите папку для сохранения" : L"Select folder";
+            string p = openFolderDialog(folderTitle.c_str());
             if (!p.empty()) {
                 DOWNLOAD_PATH = p;
                 if (!dirExists(DOWNLOAD_PATH)) createDirRecursive(DOWNLOAD_PATH);
                 saveConfig();
-                printColor("[OK] Download location updated!", GREEN);
+                printColor(tr("[OK] Download location updated!", "[OK] Папка загрузки обновлена!"), GREEN);
             }
             else {
-                printColor("[INFO] Not changed", YELLOW);
+                printColor(tr("[INFO] Not changed", "[ИНФО] Не изменено"), YELLOW);
             }
             waitForKey();
             break;
@@ -2009,9 +2130,130 @@ void settingsMenu() {
         case '8': clearArchiveMenu(); break;
         case '9': clearScreen(); cookieEditor(true); saveConfig(); break;
         case 'u': case 'U': updateComponentsMenu(); break;
-        default: printColor("[ERROR] Invalid choice!", RED); waitForKey();
+        default: printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED); waitForKey();
         }
     }
+}
+
+// ========== ARROW-KEY SELECTION MENU ==========
+int arrowSelect(const string& title, const string& description, const vector<string>& options, int currentIdx, const vector<string>& hints) {
+    int selected = (currentIdx >= 0 && currentIdx < (int)options.size()) ? currentIdx : 0;
+    while (true) {
+        clearScreen();
+        printColor("========================================", CYAN);
+        printColor(" " + title, CYAN);
+        printColor("========================================", CYAN);
+        if (!description.empty()) {
+            cout << "\n" << description << "\n";
+        }
+        cout << "\n";
+        for (int i = 0; i < (int)options.size(); i++) {
+            if (i == selected) {
+                setColor(GREEN);
+                cout << " > " << options[i] << endl;
+                setColor(WHITE);
+            } else {
+                cout << "   " << options[i] << endl;
+            }
+        }
+        if (!hints.empty() && selected >= 0 && selected < (int)hints.size() && !hints[selected].empty()) {
+            cout << "\n";
+            printColor("----------------------------------------------------------------------", CYAN);
+            setColor(YELLOW);
+            cout << " [i] " << hints[selected] << "\n";
+            setColor(WHITE);
+            printColor("----------------------------------------------------------------------", CYAN);
+        }
+        cout << "\n" << tr("Arrow keys to select, Enter to confirm, ESC to cancel",
+                           "Стрелки для выбора, Enter для подтверждения, ESC для отмены") << endl;
+        int key = _getch();
+        if (key == 27) return -1;
+        if (key == 13) return selected;
+        if (key == 0 || key == 0xE0) {
+            int scan = _getch();
+            if (scan == 72) selected = (selected > 0) ? selected - 1 : (int)options.size() - 1;
+            else if (scan == 80) selected = (selected < (int)options.size() - 1) ? selected + 1 : 0;
+        }
+    }
+}
+
+// ========== PEER FFMPEG SHARING ==========
+bool checkAndCopyFromPeerFFmpeg() {
+    wchar_t docPath[MAX_PATH];
+    string peerConfigs = "";
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, docPath))) {
+        wstring p = wstring(docPath) + L"\\MR-CLI-FOR-FFMPEG\\configs\\";
+        peerConfigs = wstringToUtf8(p);
+    }
+    if (peerConfigs.empty() || !fileExists(peerConfigs + "ffmpeg.exe")) {
+        string fallback = "C:\\MR-CLI-FOR-FFMPEG\\configs\\";
+        if (fileExists(fallback + "ffmpeg.exe")) {
+            peerConfigs = fallback;
+        }
+    }
+    if (peerConfigs.empty() || !fileExists(peerConfigs + "ffmpeg.exe")) {
+        return false;
+    }
+
+    string otherAppName = "MR CLI FOR FFMPEG";
+    string title = tr("FOUND FFMPEG", "ОБНАРУЖЕН FFMPEG");
+    string desc = tr(
+        "The program just detected that you also use " + otherAppName + ".\n"
+        "It already has FFmpeg installed.\n"
+        "Would you like to use a shared copy to avoid downloading again?",
+        "Программа только что обнаружила, что вы также используете " + otherAppName + ".\n"
+        "У неё уже установлен FFmpeg.\n"
+        "Хотите использовать общую копию, чтобы не скачивать повторно?"
+    );
+    vector<string> opts = {
+        tr("Yes, use copy (fast and offline)", "Да, использовать копию (быстро и без интернета)"),
+        tr("No, download anew (download speed depends on your network)", "Нет, скачать заново (скорость загрузки зависит от вашей сети)")
+    };
+
+    int sel = arrowSelect(title, desc, opts, 0);
+    if (sel != 0) {
+        return false;
+    }
+
+    if (!dirExists(CONFIG_PATH)) {
+        createDirRecursive(CONFIG_PATH);
+    }
+
+    clearScreen();
+    printColor("========================================", CYAN);
+    printColor(" " + tr("COPYING FFMPEG FROM ", "КОПИРОВАНИЕ FFMPEG ИЗ ") + otherAppName, CYAN);
+    printColor("========================================", CYAN);
+    cout << "\n";
+    printColor(tr("[INFO] Copying FFmpeg components...", "[ИНФО] Копирование компонентов FFmpeg..."), CYAN);
+
+    vector<string> filesToCopy = {"ffmpeg.exe", "ffprobe.exe", "ffplay.exe"};
+    bool copiedAny = false;
+    for (const auto& f : filesToCopy) {
+        string src = peerConfigs + f;
+        string dst = CONFIG_PATH + f;
+        if (fileExists(src)) {
+            wstring wSrc = utf8ToWstring(src);
+            wstring wDst = utf8ToWstring(dst);
+            if (CopyFileW(wSrc.c_str(), wDst.c_str(), FALSE)) {
+                copiedAny = true;
+                printColor(tr("[OK] Copied: ", "[OK] Скопирован: ") + f, GREEN);
+            }
+            else {
+                printColor(tr("[ERROR] Failed to copy: ", "[ОШИБКА] Не удалось скопировать: ") + f, RED);
+            }
+        }
+    }
+
+    if (copiedAny && fileExists(CONFIG_PATH + "ffmpeg.exe")) {
+        FFMPEG_FOUND = true;
+        FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
+        cout << "\n";
+        printColor(tr("[OK] FFmpeg successfully copied!", "[OK] FFmpeg успешно скопирован!"), GREEN);
+        Sleep(1500);
+        return true;
+    }
+
+    return false;
 }
 
 // ========== DEPENDENCY CHECKS & AUTO INSTALLER ==========
@@ -2024,9 +2266,15 @@ bool checkDependencies() {
     FFMPEG_FOUND = fileExists(FFMPEG_PATH);
     QJS_FOUND = fileExists(QJS_PATH);
 
+    if (!FFMPEG_FOUND) {
+        if (checkAndCopyFromPeerFFmpeg()) {
+            FFMPEG_FOUND = fileExists(FFMPEG_PATH);
+        }
+    }
+
     if (!YTDLP_FOUND || !FFMPEG_FOUND || !QJS_FOUND) {
         printColor("============================================", RED);
-        printColor("[ERROR] Missing recommended components on your computer", RED);
+        printColor(tr("[ERROR] Missing recommended components on your computer", "[ОШИБКА] На вашем компьютере отсутствуют рекомендуемые компоненты"), RED);
         printColor("============================================", RED);
 
         string missing = "";
@@ -2035,11 +2283,11 @@ bool checkDependencies() {
         if (!QJS_FOUND) missing += "QuickJS ";
 
         printColor("\n============================================", CYAN);
-        printColor(" AUTO INSTALLER", CYAN);
+        printColor(tr(" AUTO INSTALLER", " АВТОУСТАНОВЩИК"), CYAN);
         printColor("============================================", CYAN);
 
         while (true) {
-            printColor("\nInstall " + missing + "automatically? (y/n): \n", CYAN, false);
+            printColor("\n" + tr("Install ", "Установить ") + missing + tr("automatically? (y/n): \n", "автоматически? (y/n): \n"), CYAN, false);
 
             char ch = getMenuChoice();
 
@@ -2051,15 +2299,15 @@ bool checkDependencies() {
                 cout << "n" << endl;
                 if (!YTDLP_FOUND) {
                     printColor("\n============================================", YELLOW);
-                    printColor(" [ERROR] yt-dlp is required to run the application!", RED);
-                    printColor(" [INFO] Download from: https://github.com/yt-dlp/yt-dlp/releases", YELLOW);
-                    printColor(" [INFO] Place 'yt-dlp.exe' in: " + CONFIG_PATH, YELLOW);
+                    printColor(tr(" [ERROR] yt-dlp is required to run the application!", " [ОШИБКА] yt-dlp необходим для работы программы!"), RED);
+                    printColor(tr(" [INFO] Download from: https://github.com/yt-dlp/yt-dlp/releases", " [ИНФО] Скачайте с: https://github.com/yt-dlp/yt-dlp/releases"), YELLOW);
+                    printColor(tr(" [INFO] Place 'yt-dlp.exe' in: ", " [ИНФО] Поместите 'yt-dlp.exe' в: ") + CONFIG_PATH, YELLOW);
                     printColor("============================================", YELLOW);
                     waitForKey();
                     return false;
                 }
                 // If yt-dlp is present but ffmpeg/qjs are skipped, continue with warning
-                printColor("\n[WARNING] Proceeding without optional components. Some features may be limited.", YELLOW);
+                printColor("\n" + tr("[WARNING] Proceeding without optional components. Some features may be limited.", "[ПРЕДУПРЕЖДЕНИЕ] Продолжение без опциональных компонентов. Некоторые функции могут быть ограничены."), YELLOW);
                 Sleep(1500);
                 return true;
             }
@@ -2071,75 +2319,75 @@ bool checkDependencies() {
         }
 
         if (!YTDLP_FOUND) {
-            printColor("\n[INFO] Installing yt-dlp (~20MB)...", CYAN);
+            printColor("\n" + tr("[INFO] Installing yt-dlp (~20MB)...", "[ИНФО] Установка yt-dlp (~20MB)..."), CYAN);
             if (downloadFile("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe", CONFIG_PATH + "yt-dlp.exe", "yt-dlp")) {
                 YTDLP_FOUND = true;
-                printColor("[OK] yt-dlp installed successfully!", GREEN);
+                printColor(tr("[OK] yt-dlp installed successfully!", "[OK] yt-dlp успешно установлен!"), GREEN);
             }
             else {
-                printColor("[ERROR] Failed to install yt-dlp!", RED);
+                printColor(tr("[ERROR] Failed to install yt-dlp!", "[ОШИБКА] Не удалось установить yt-dlp!"), RED);
             }
         }
 
         if (!FFMPEG_FOUND) {
-            printColor("\n[INFO] Installing FFmpeg (~160MB)...", CYAN);
+            printColor("\n" + tr("[INFO] Installing FFmpeg (~160MB)...", "[ИНФО] Установка FFmpeg (~160MB)..."), CYAN);
             string zipFile = CONFIG_PATH + "ffmpeg.zip";
             if (downloadFile("https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip", zipFile, "FFmpeg")) {
-                printComponentProgress("FFmpeg", 100.0, "Extracting components...");
+                printComponentProgress("FFmpeg", 100.0, tr("Extracting components...", "Распаковка компонентов..."));
                 if (extractZip(zipFile, CONFIG_PATH)) {
                     organizeExtractedTool("ffmpeg.exe", CONFIG_PATH);
                     FFMPEG_FOUND = fileExists(CONFIG_PATH + "ffmpeg.exe");
                     if (FFMPEG_FOUND) {
                         FFMPEG_PATH = CONFIG_PATH + "ffmpeg.exe";
                         cout << "\n";
-                        printColor("[OK] FFmpeg and FFprobe installed successfully!", GREEN);
+                        printColor(tr("[OK] FFmpeg and FFprobe installed successfully!", "[OK] FFmpeg и FFprobe успешно установлены!"), GREEN);
                     }
                     else {
                         cout << "\n";
-                        printColor("[ERROR] Failed to locate ffmpeg.exe after extraction!", RED);
+                        printColor(tr("[ERROR] Failed to locate ffmpeg.exe after extraction!", "[ОШИБКА] Не удалось найти ffmpeg.exe после распаковки!"), RED);
                     }
                 }
                 else {
                     cout << "\n";
-                    printColor("[ERROR] Failed to extract FFmpeg archive!", RED);
+                    printColor(tr("[ERROR] Failed to extract FFmpeg archive!", "[ОШИБКА] Не удалось распаковать архив FFmpeg!"), RED);
                 }
 
                 std::error_code ec;
                 fs::remove(fs::u8path(zipFile), ec);
             }
             else {
-                printColor("[ERROR] Failed to download FFmpeg!", RED);
+                printColor(tr("[ERROR] Failed to download FFmpeg!", "[ОШИБКА] Не удалось скачать FFmpeg!"), RED);
             }
         }
 
         if (!QJS_FOUND) {
-            printColor("\n[INFO] Installing QuickJS (~1MB)...", CYAN);
+            printColor("\n" + tr("[INFO] Installing QuickJS (~1MB)...", "[ИНФО] Установка QuickJS (~1MB)..."), CYAN);
             string zipFile = CONFIG_PATH + "quickjs.zip";
             if (downloadFile("https://bellard.org/quickjs/binary_releases/quickjs-win-x86_64-2026-06-04.zip", zipFile, "QuickJS")) {
-                printComponentProgress("QuickJS", 100.0, "Extracting components...");
+                printComponentProgress("QuickJS", 100.0, tr("Extracting components...", "Распаковка компонентов..."));
                 if (extractZip(zipFile, CONFIG_PATH)) {
                     organizeExtractedTool("qjs.exe", CONFIG_PATH);
                     QJS_FOUND = fileExists(CONFIG_PATH + "qjs.exe");
                     if (QJS_FOUND) {
                         QJS_PATH = CONFIG_PATH + "qjs.exe";
                         cout << "\n";
-                        printColor("[OK] QuickJS installed successfully!", GREEN);
+                        printColor(tr("[OK] QuickJS installed successfully!", "[OK] QuickJS успешно установлен!"), GREEN);
                     }
                     else {
                         cout << "\n";
-                        printColor("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", YELLOW);
+                        printColor(tr("[WARNING] Could not find qjs.exe in archive (QuickJS is optional).", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось найти qjs.exe в архиве (QuickJS необязателен)."), YELLOW);
                     }
                 }
                 else {
                     cout << "\n";
-                    printColor("[WARNING] Failed to extract QuickJS archive.", YELLOW);
+                    printColor(tr("[WARNING] Failed to extract QuickJS archive.", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось распаковать архив QuickJS."), YELLOW);
                 }
 
                 std::error_code ec;
                 fs::remove(fs::u8path(zipFile), ec);
             }
             else {
-                printColor("[WARNING] Failed to download QuickJS (QuickJS is optional).", YELLOW);
+                printColor(tr("[WARNING] Failed to download QuickJS (QuickJS is optional).", "[ПРЕДУПРЕЖДЕНИЕ] Не удалось скачать QuickJS (QuickJS необязателен)."), YELLOW);
             }
         }
 
@@ -2149,12 +2397,12 @@ bool checkDependencies() {
         QJS_FOUND = fileExists(QJS_PATH);
 
         if (YTDLP_FOUND) {
-            printColor("\n[OK] Dependencies check completed!", GREEN);
+            printColor("\n" + tr("[OK] Dependencies check completed!", "[OK] Проверка зависимостей завершена!"), GREEN);
             Sleep(1000);
             return true;
         }
         else {
-            printColor("\n[ERROR] yt-dlp is missing and could not be installed!", RED);
+            printColor("\n" + tr("[ERROR] yt-dlp is missing and could not be installed!", "[ОШИБКА] yt-dlp отсутствует и не может быть установлен!"), RED);
             waitForKey();
             return false;
         }
@@ -2167,14 +2415,20 @@ bool checkDependencies() {
 void displayMenu() {
     clearScreen();
     printColor("========================================", CYAN);
-    printColor(" MR CLI FOR YT DLP v1.1.1", CYAN);
+    printColor(" MR CLI FOR YT DLP v1.1.2", CYAN);
     printColor("========================================", CYAN);
     printColor("========================================", GREEN);
-    printColor(" YT-DLP:  " + string(YTDLP_FOUND ? "[OK] installed" : "[ERROR] not found"), YTDLP_FOUND ? GREEN : RED);
-    printColor(" FFMPEG:  " + string(FFMPEG_FOUND ? "[OK] installed" : "[WARNING] not installed"), FFMPEG_FOUND ? GREEN : YELLOW);
-    printColor(" QuickJS: " + string(QJS_FOUND ? "[OK] installed" : "[WARNING] not installed"), QJS_FOUND ? GREEN : YELLOW);
+    printColor(" YT-DLP:  " + string(YTDLP_FOUND ? tr("[OK] installed", "[OK] установлен") : tr("[ERROR] not found", "[ОШИБКА] не найден")), YTDLP_FOUND ? GREEN : RED);
+    printColor(" FFMPEG:  " + string(FFMPEG_FOUND ? tr("[OK] installed", "[OK] установлен") : tr("[WARNING] not installed", "[ПРЕДУПРЕЖДЕНИЕ] не установлен")), FFMPEG_FOUND ? GREEN : YELLOW);
+    printColor(" QuickJS: " + string(QJS_FOUND ? tr("[OK] installed", "[OK] установлен") : tr("[WARNING] not installed", "[ПРЕДУПРЕЖДЕНИЕ] не установлен")), QJS_FOUND ? GREEN : YELLOW);
     printColor("========================================", GREEN);
-    cout << "========================================\n1. Start download\n2. Settings\n0. Exit (ESC)\n========================================\n\nYour number choice: ";
+    cout << "========================================\n"
+        << " 1. " << tr("Start download", "Начать скачивание") << "\n"
+        << " 2. " << tr("Settings", "Настройки") << "\n"
+        << " l. " << (CURRENT_LANG == LANG_EN ? "Language: English" : "Язык: Русский") << "\n"
+        << " 0. " << tr("Exit (ESC)", "Выход (ESC)") << "\n"
+        << "========================================\n\n"
+        << tr("Your number choice: ", "Ваш выбор: ");
 }
 
 int main() {
@@ -2204,6 +2458,7 @@ int main() {
     }
 
     ARCHIVE_PATH = getArchivePath();
+    initDefaultLanguage();
     loadConfig();
 
     if (!checkDependencies()) {
@@ -2215,7 +2470,7 @@ int main() {
         displayMenu();
         char ch = getMenuChoice();
         if (ch == 27 || ch == '0') {
-            cout << "Exiting...\n";
+            cout << tr("Exiting...", "Выход...") << "\n";
             CoUninitialize();
             return 0;
         }
@@ -2223,8 +2478,12 @@ int main() {
         switch (ch) {
         case '1': startDownload(); break;
         case '2': settingsMenu(); break;
+        case 'l':
+            CURRENT_LANG = (CURRENT_LANG == LANG_EN) ? LANG_RU : LANG_EN;
+            saveConfig();
+            break;
         default:
-            printColor("[ERROR] Invalid choice!", RED);
+            printColor(tr("[ERROR] Invalid choice!", "[ОШИБКА] Неверный выбор!"), RED);
             waitForKey();
         }
     }
