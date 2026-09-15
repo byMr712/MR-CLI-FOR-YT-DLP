@@ -8,8 +8,7 @@ MR CLI FOR YT DLP is a convenient command-line wrapper for yt-dlp that provides 
 [![Platform](https://img.shields.io/badge/platform-Windows-green.svg)]()
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-
-## 🎯 Program Features
+## Program Features
 - Download individual videos and entire playlists
 - Select start and end items for playlist downloads
 - Resume interrupted playlist downloads
@@ -17,36 +16,36 @@ MR CLI FOR YT DLP is a convenient command-line wrapper for yt-dlp that provides 
 - Automatic format selection if the video does not match your settings
 - Video transcoding (codec recompiler) – planned for the future.
 
-## 📋 Prerequisites
+## Prerequisites
 - Windows 10/11 (The versions below—please test them)
 
-## 📥 Installation
+## Installation
 1. Download the latest release
 2. Run `MR-CLI-FOR-YT-DLP.exe`
 3. The program will automatically check and install required dependencies
 
-## 🎬 Download Process
+## Download Process
 1. Enter the video or playlist URL
 2. For playlists, specify start/end indices (optional)
 3. Watch real-time download progress
 4. File saved to your specified location
 - (default: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## 🎵 Download Only Audio
+## Download Only Audio
 1. Settings > Only audio: [ON]
 2. Start download > [video URL]
 3. Result: "Video Title [only audio].m4a"
 4. File saved to your specified location
 - (default: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## 🎦 Download Video Audio
+## Download Video Audio
 1. Settings > Only video: [ON]
 2. Start download > [video URL]
 3. Result: "Video Title [only video].mp4"
 4. File saved to your specified location
 - (default: \Documents\MR-CLI-FOR-YT-DLP\)
 
-## ⚙️ Settings Menu
+## Settings Menu
 1. Download location: [C:\Users\USER\Documents\MR-CLI-FOR-YT-DLP]
 2. Video quality: [1080p 60fps MP4(H.264)]
 3. Audio quality: [M4A(AAC)]
@@ -56,7 +55,7 @@ MR CLI FOR YT DLP is a convenient command-line wrapper for yt-dlp that provides 
 7. Update cookies
 0. Exit
 
-## 🎨 Quality Settings
+## Quality Settings
 - **Video resolution**: 2160p (4K), 1440p (2K), 1080p (FullHD), 720p (HD), 480p, 360p
 - **Frame rate**: 60fps or 30fps
 - **Video formats**: MP4(AV1), MP4(H.264), WEBM(AV1), WEBM(VP9)
@@ -64,13 +63,13 @@ MR CLI FOR YT DLP is a convenient command-line wrapper for yt-dlp that provides 
 
 > **Note**: For 4K (2160p) and 2K (1440p) resolutions, YouTube typically provides only AV1 and VP9 codecs in WEBM container. MP4(H.264) is not available for these resolutions. The program automatically handles this and selects the best available codec for your chosen resolution.
 
-## 🖥️ User Interface
+## User Interface
 - Color-coded console output for better readability
 - Real-time download progress bar with speed and ETA
 - Interactive menu with keyboard navigation (no Enter key needed)
 - Persistent settings saved in `mr-config.txt`
 
-## 🍪 Cookie Management
+## Cookie Management
 The built-in cookie editor helps you access restricted content:
 - Select a cookie file (.txt)
 - Paste from clipboard
@@ -78,12 +77,12 @@ The built-in cookie editor helps you access restricted content:
 
 > **Note**: Currently, the program stores your cookies without encryption.
 
-## 🔗 Supported URLs
+## Supported URLs
 - Single videos: `https://youtube.com/watch?v=...`
 - Playlists: `https://youtube.com/playlist?list=...`
 - Short links: `https://youtu.be/...`
 
-## 🛠️ Building from Source
+## Building from Source
 ### Requirements
 - Visual Studio 2019 or later
 - Windows SDK
@@ -93,17 +92,17 @@ The built-in cookie editor helps you access restricted content:
 - Open file **mr-cli-yt-dlp.sln** in Visual Studio.
 - Press **Ctrl+Shift+B** to build the EXE file.
 
-## 🤝 Contributing
+## Contributing
 1. Fork the repository
 2. Create your feature branch
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
 
-## 📄 License
+## License
 1. [Apache License 2.0](LICENSE) – feel free to use and modify!
 
-## 🙏 Many thanks to
+## Many thanks to
 1. [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 2. [FFmpeg](https://ffmpeg.org/)
 3. [QuickJS](https://github.com/bellard/quickjs)
