@@ -79,6 +79,7 @@ During the pause, a real-time countdown is displayed in the console. You can ski
 - Color-coded console output for better readability
 - Real-time download progress bar with speed and ETA
 - Interactive menu with keyboard navigation (no Enter key needed)
+- Download control: pressing `ESC` during download pauses the stream and opens an action menu (resume download, cancel current video, or cancel all videos)
 - Persistent settings saved in `mr-config.txt`
 
 ## Cookie Management

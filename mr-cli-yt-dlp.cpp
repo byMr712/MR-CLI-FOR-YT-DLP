@@ -39,7 +39,8 @@ enum ErrorType {
     UNAVAILABLE_ERROR = 9,
     DRM_ERROR = 10,
     FORMAT_ERROR = 11,
-    NETWORK_ERROR = 12
+    NETWORK_ERROR = 12,
+    SKIP_CURRENT_VIDEO = 13
 };
 
 string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH, PLUGINS_PATH;
@@ -1149,8 +1150,72 @@ bool runPlaylistDelayCountdown(HANDLE hProcess, int completedCount, int duration
     return !cancelled;
 }
 
+// ========== INLINE MENU SELECTION (IN-PLACE WITHOUT CLEARING SCREEN) ==========
+int inlineMenuSelect(const vector<string>& options) {
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hOut, &csbi);
+
+    int linesNeeded = (int)options.size() + 4;
+    if (csbi.dwCursorPosition.Y + linesNeeded >= csbi.dwSize.Y) {
+        for (int k = 0; k < linesNeeded; k++) cout << "\n";
+        GetConsoleScreenBufferInfo(hOut, &csbi);
+        csbi.dwCursorPosition.Y -= (SHORT)linesNeeded;
+    }
+    COORD startCoord = csbi.dwCursorPosition;
+
+    int selected = 0;
+    while (true) {
+        SetConsoleCursorPosition(hOut, startCoord);
+        cout << "\n";
+        printColor("--------------------------------------------", CYAN);
+        for (int i = 0; i < (int)options.size(); i++) {
+            if (i == selected) {
+                setColor(GREEN);
+                cout << " > " << (i + 1) << ". " << options[i] << "                     \n";
+                setColor(WHITE);
+            } else {
+                cout << "   " << (i + 1) << ". " << options[i] << "                     \n";
+            }
+        }
+        printColor("--------------------------------------------", CYAN);
+        setColor(YELLOW);
+        cout << " " << tr("Arrows to select, Enter or 1-" + to_string(options.size()) + " to confirm",
+                         "Стрелки для выбора, Enter или 1-" + to_string(options.size()) + " для подтверждения")
+             << "         \n";
+        setColor(WHITE);
+
+        wint_t key = _getwch();
+        if (key == 13) {
+            return selected;
+        }
+        if (key == 27) { // ESC resumes download
+            return 0;
+        }
+        if (key == 3) { // Ctrl+C cancels
+            return ((int)options.size() > 2) ? 2 : 1;
+        }
+        if (key == 0 || key == 0xE0) {
+            wint_t scan = _getwch();
+            if (scan == 72) { // Up
+                selected = (selected > 0) ? selected - 1 : (int)options.size() - 1;
+            } else if (scan == 80) { // Down
+                selected = (selected < (int)options.size() - 1) ? selected + 1 : 0;
+            }
+        } else {
+            char ch = normalizeKeyToEnglish(key);
+            if (ch >= '1' && ch < '1' + (int)options.size()) {
+                return (ch - '1');
+            }
+            if (ch == 'q' || ch == 'Q') {
+                return ((int)options.size() > 2) ? 2 : 1;
+            }
+        }
+    }
+}
+
 // ========== PROCESS EXECUTION WITH LIVE PROGRESS ==========
-bool execWithProgress(const wstring& cmdLine) {
+bool execWithProgress(const wstring& cmdLine, bool isPlaylistMode = false) {
     SECURITY_ATTRIBUTES sa;
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE;
@@ -1198,7 +1263,7 @@ bool execWithProgress(const wstring& cmdLine) {
 
     string line;
     bool progressActive = false;
-    bool isPlaylist = false;
+    bool isPlaylist = isPlaylistMode || (TOTAL_ITEMS_IN_PLAYLIST > 1);
     bool mergeFailed = false;
     int curItem = 0, totalItems = 0;
     int playlistItemsProcessed = 0;
@@ -1210,18 +1275,56 @@ bool execWithProgress(const wstring& cmdLine) {
     DWORD bytesRead = 0;
 
     while (true) {
-        // Check if user pressed ESC to cancel active download
+        // Check if user pressed ESC to pause/cancel active download
         if (_kbhit()) {
             int key = _getch();
             if (key == 27) { // ESC
                 if (progressActive) { cout << endl; progressActive = false; }
-                printColor("\n[INFO] Download cancelled by user (ESC).", YELLOW);
-                LAST_ERROR = CANCELLED_BY_USER;
-                if (!currentVideoId.empty()) {
-                    removeIdFromArchive(currentVideoId);
+                suspendProcess(pi.hProcess);
+                printColor("\n" + tr("[INFO] Stopped by user.", "[ИНФО] Остановлено пользователем."), YELLOW);
+
+                bool isMulti = isPlaylist || isPlaylistMode || (TOTAL_ITEMS_IN_PLAYLIST > 1);
+                vector<string> pauseOptions;
+                pauseOptions.push_back(tr("Resume download", "Продолжить скачивание"));
+                pauseOptions.push_back(tr("Cancel download of current video", "Отменить скачивание текущего видео"));
+                if (isMulti) {
+                    pauseOptions.push_back(tr("Cancel download of all videos", "Отменить скачивание всех видео"));
                 }
-                TerminateProcess(pi.hProcess, 1);
-                break;
+
+                int selPause = inlineMenuSelect(pauseOptions);
+
+                if (selPause == 0) {
+                    // Resume download
+                    printColor("\n" + tr("[INFO] Resuming download...", "[ИНФО] Возобновление скачивания..."), GREEN);
+                    resumeProcess(pi.hProcess);
+                    continue;
+                }
+                else if (selPause == 1) {
+                    // Cancel download of current video
+                    TerminateProcess(pi.hProcess, 1);
+                    if (!currentVideoId.empty()) {
+                        removeIdFromArchive(currentVideoId);
+                    }
+                    if (isMulti) {
+                        LAST_ERROR = SKIP_CURRENT_VIDEO;
+                        printColor("\n" + tr("[INFO] Current video cancelled. Skipping to next...", "[ИНФО] Скачивание текущего видео отменено. Переход к следующему..."), YELLOW);
+                    }
+                    else {
+                        LAST_ERROR = CANCELLED_BY_USER;
+                        printColor("\n" + tr("[INFO] Video download cancelled by user.", "[ИНФО] Скачивание видео отменено пользователем."), YELLOW);
+                    }
+                    break;
+                }
+                else if (selPause == 2 && isMulti) {
+                    // Cancel download of all videos
+                    TerminateProcess(pi.hProcess, 1);
+                    if (!currentVideoId.empty()) {
+                        removeIdFromArchive(currentVideoId);
+                    }
+                    LAST_ERROR = CANCELLED_BY_USER;
+                    printColor("\n" + tr("[INFO] Download of all videos cancelled by user.", "[ИНФО] Скачивание всех видео отменено пользователем."), YELLOW);
+                    break;
+                }
             }
         }
 
@@ -1528,7 +1631,7 @@ bool execWithProgress(const wstring& cmdLine) {
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
-    if (LAST_ERROR == CANCELLED_BY_USER) {
+    if (LAST_ERROR == CANCELLED_BY_USER || LAST_ERROR == SKIP_CURRENT_VIDEO) {
         if (!currentVideoId.empty()) {
             removeIdFromArchive(currentVideoId);
         }
@@ -1811,10 +1914,32 @@ void startDownload(const string& url = "", const string& start = "", const strin
     printColor("============================================", CYAN);
     cout << endl;
 
-    bool ok = execWithProgress(cmd);
+    bool ok = execWithProgress(cmd, isPl);
 
     if (LAST_ERROR == CANCELLED_BY_USER) {
         LAST_ERROR = NOT_ERROR;
+        waitForKey();
+        return;
+    }
+
+    if (LAST_ERROR == SKIP_CURRENT_VIDEO) {
+        LAST_ERROR = NOT_ERROR;
+        if (isPl) {
+            int currentIndex = 1;
+            if (LAST_PROCESSED_ITEM > 0) {
+                currentIndex = LAST_PROCESSED_ITEM;
+            } else if (!s.empty()) {
+                try { currentIndex = stoi(s); } catch (...) { currentIndex = 1; }
+            }
+            int nextIndex = currentIndex + 1;
+            if (TOTAL_ITEMS_IN_PLAYLIST > 0 && nextIndex > TOTAL_ITEMS_IN_PLAYLIST) {
+                printColor("\n" + tr("[OK] All remaining playlist items completed.", "[OK] Все оставшиеся видео плейлиста завершены."), GREEN);
+                waitForKey();
+                return;
+            }
+            startDownload(u, to_string(nextIndex), e, true, true);
+            return;
+        }
         waitForKey();
         return;
     }
