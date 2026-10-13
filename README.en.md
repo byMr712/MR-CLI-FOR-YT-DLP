@@ -50,10 +50,22 @@ MR CLI FOR YT DLP is a convenient command-line wrapper for yt-dlp that provides 
 2. Video quality: [1080p 60fps MP4(H.264)]
 3. Audio quality: [M4A(AAC)]
 4. Codec recompiler: [OFF]
-5. Only audio: [OFF]
-6. Only video: [OFF]
-7. Update cookies
+5. Skip already downloaded (archive): [ON]
+6. Only audio: [OFF]
+7. Only video: [OFF]
+8. Configure delay (playlists): [ON (every 10 vids / 30s)]
+9. Clear download history (archive)
+c. Update cookies
+u. Update yt-dlp & components
 0. Exit
+
+## Playlist Delay
+To prevent temporary YouTube IP blocks, `HTTP 429 (Too Many Requests)` errors, and bot verification checks, the program includes an automatic pause when downloading playlists:
+- **Delay state**: enabled or disabled (default: enabled).
+- **Trigger interval**: every N videos (default: every 10 videos).
+- **Wait duration**: pause duration in seconds (default: 30 seconds).
+
+During the pause, a real-time countdown is displayed in the console. You can skip the delay at any time by pressing `ESC`, `Enter`, or `Space`, or stop the download with `Q`.
 
 ## Quality Settings
 - **Video resolution**: 2160p (4K), 1440p (2K), 1080p (FullHD), 720p (HD), 480p, 360p

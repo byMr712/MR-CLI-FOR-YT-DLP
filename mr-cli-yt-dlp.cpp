@@ -47,6 +47,9 @@ string COOKIES_FILE = "cookies.txt";
 string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
 string AUDIO_FORMAT = "M4A(AAC)";
 bool USE_COOKIES = true, CODEC_RECOMPILER = false, ONLY_AUDIO = false, ONLY_VIDEO = false, USE_ARCHIVE = true;
+bool PLAYLIST_DELAY_ENABLED = true;
+int PLAYLIST_DELAY_INTERVAL = 10;
+int PLAYLIST_DELAY_DURATION = 30;
 bool YTDLP_FOUND = false, FFMPEG_FOUND = false, QJS_FOUND = false;
 int LAST_ERROR = NOT_ERROR;
 string ARCHIVE_PATH = "";
@@ -648,6 +651,9 @@ void saveConfig() {
         << "USE_ARCHIVE=" << (USE_ARCHIVE ? "true" : "false") << "\n"
         << "ONLY_AUDIO=" << (ONLY_AUDIO ? "true" : "false") << "\n"
         << "ONLY_VIDEO=" << (ONLY_VIDEO ? "true" : "false") << "\n"
+        << "PLAYLIST_DELAY_ENABLED=" << (PLAYLIST_DELAY_ENABLED ? "true" : "false") << "\n"
+        << "PLAYLIST_DELAY_INTERVAL=" << PLAYLIST_DELAY_INTERVAL << "\n"
+        << "PLAYLIST_DELAY_DURATION=" << PLAYLIST_DELAY_DURATION << "\n"
         << "LANGUAGE=" << (CURRENT_LANG == LANG_RU ? "ru" : "en") << "\n";
     f.close();
 }
@@ -677,6 +683,19 @@ void loadConfig() {
                 else if (l.find("USE_ARCHIVE=") == 0) USE_ARCHIVE = (l.substr(12) == "true");
                 else if (l.find("ONLY_AUDIO=") == 0) ONLY_AUDIO = (l.substr(11) == "true");
                 else if (l.find("ONLY_VIDEO=") == 0) ONLY_VIDEO = (l.substr(11) == "true");
+                else if (l.find("PLAYLIST_DELAY_ENABLED=") == 0) PLAYLIST_DELAY_ENABLED = (l.substr(23) == "true");
+                else if (l.find("PLAYLIST_DELAY_INTERVAL=") == 0) {
+                    try {
+                        int v = stoi(l.substr(24));
+                        if (v > 0) PLAYLIST_DELAY_INTERVAL = v;
+                    } catch (...) {}
+                }
+                else if (l.find("PLAYLIST_DELAY_DURATION=") == 0) {
+                    try {
+                        int v = stoi(l.substr(24));
+                        if (v > 0) PLAYLIST_DELAY_DURATION = v;
+                    } catch (...) {}
+                }
                 else if (l.find("LANGUAGE=") == 0) CURRENT_LANG = (l.substr(9) == "ru") ? LANG_RU : LANG_EN;
             }
             f.close();
@@ -1046,6 +1065,90 @@ bool isAudioStream(const string& path, const string& ext) {
     return false;
 }
 
+// ========== PROCESS SUSPEND / RESUME & PLAYLIST DELAY ==========
+typedef LONG(NTAPI* pfnNtSuspendProcess)(HANDLE ProcessHandle);
+typedef LONG(NTAPI* pfnNtResumeProcess)(HANDLE ProcessHandle);
+
+void suspendProcess(HANDLE hProcess) {
+    if (!hProcess) return;
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtDll) {
+        pfnNtSuspendProcess pSuspend = (pfnNtSuspendProcess)GetProcAddress(hNtDll, "NtSuspendProcess");
+        if (pSuspend) pSuspend(hProcess);
+    }
+}
+
+void resumeProcess(HANDLE hProcess) {
+    if (!hProcess) return;
+    HMODULE hNtDll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtDll) {
+        pfnNtResumeProcess pResume = (pfnNtResumeProcess)GetProcAddress(hNtDll, "NtResumeProcess");
+        if (pResume) pResume(hProcess);
+    }
+}
+
+bool runPlaylistDelayCountdown(HANDLE hProcess, int completedCount, int durationSeconds) {
+    if (durationSeconds <= 0) return true;
+    suspendProcess(hProcess);
+
+    cout << "\n";
+    printColor("----------------------------------------------------------------------", CYAN);
+    setColor(YELLOW);
+    cout << " [!] " << tr("Playlist delay: ", "Задержка для плейлиста: ")
+         << completedCount << tr(" videos downloaded.", " видео скачано.") << "\n";
+    cout << "     " << tr("Pausing to prevent YouTube rate limits (HTTP 429).",
+                           "Пауза для защиты от блокировок YouTube (HTTP 429).") << "\n";
+    cout << "     " << tr("Press ESC, Enter or Space to skip delay, Q to stop download.",
+                           "Нажмите ESC, Enter или Пробел для пропуска, Q для отмены загрузки.") << "\n";
+    setColor(WHITE);
+    printColor("----------------------------------------------------------------------", CYAN);
+
+    bool cancelled = false;
+
+    for (int sec = durationSeconds; sec > 0; sec--) {
+        setColor(CYAN);
+        cout << "\r" << tr(" [PAUSE] Resuming in ", " [ПАУЗА] Продолжение через ")
+             << sec << tr("s... (ESC: skip, Q: cancel)   ", "с... (ESC: пропуск, Q: отмена)   ") << flush;
+        setColor(WHITE);
+
+        bool skip = false;
+        for (int ms = 0; ms < 10; ms++) {
+            if (_kbhit()) {
+                wint_t k = _getwch();
+                char c = normalizeKeyToEnglish(k);
+                if (k == 27 || k == 13 || k == ' ') {
+                    skip = true;
+                    break;
+                } else if (c == 'q' || c == 'Q' || k == 3) {
+                    cancelled = true;
+                    break;
+                }
+            }
+            Sleep(100);
+        }
+        if (cancelled) {
+            setColor(RED);
+            cout << "\r" << tr(" [PAUSE] Download cancelled by user!                 \n",
+                               " [ПАУЗА] Загрузка отменена пользователем!             \n") << flush;
+            setColor(WHITE);
+            break;
+        }
+        if (skip) {
+            setColor(YELLOW);
+            cout << "\r" << tr(" [PAUSE] Delay skipped! Resuming download...           \n",
+                               " [ПАУЗА] Пауза пропущена! Возобновление загрузки...    \n") << flush;
+            setColor(WHITE);
+            break;
+        }
+    }
+
+    if (hProcess) {
+        resumeProcess(hProcess);
+    }
+    cout << "\n";
+    return !cancelled;
+}
+
 // ========== PROCESS EXECUTION WITH LIVE PROGRESS ==========
 bool execWithProgress(const wstring& cmdLine) {
     SECURITY_ATTRIBUTES sa;
@@ -1098,6 +1201,7 @@ bool execWithProgress(const wstring& cmdLine) {
     bool isPlaylist = false;
     bool mergeFailed = false;
     int curItem = 0, totalItems = 0;
+    int playlistItemsProcessed = 0;
     string currentVideoId = "";
     bool currentVideoCompleted = false;
     string mergeErrorPath = "";
@@ -1190,6 +1294,19 @@ bool execWithProgress(const wstring& cmdLine) {
                             if (curItem > 0 && newCurItem != curItem) {
                                 if (progressActive) { cout << endl; progressActive = false; }
                                 cout << "\n";
+                                playlistItemsProcessed++;
+                                if (PLAYLIST_DELAY_ENABLED && PLAYLIST_DELAY_INTERVAL > 0 && PLAYLIST_DELAY_DURATION > 0) {
+                                    if (playlistItemsProcessed % PLAYLIST_DELAY_INTERVAL == 0) {
+                                        if (!runPlaylistDelayCountdown(pi.hProcess, playlistItemsProcessed, PLAYLIST_DELAY_DURATION)) {
+                                            LAST_ERROR = CANCELLED_BY_USER;
+                                            if (!currentVideoId.empty()) {
+                                                removeIdFromArchive(currentVideoId);
+                                            }
+                                            TerminateProcess(pi.hProcess, 1);
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             if (newCurItem != curItem) {
                                 currentVideoCompleted = false;
@@ -1398,6 +1515,7 @@ bool execWithProgress(const wstring& cmdLine) {
                 line += c;
             }
         }
+        if (LAST_ERROR == CANCELLED_BY_USER) break;
     }
 
     if (progressActive) cout << endl;
@@ -2598,6 +2716,127 @@ void clearArchiveMenu() {
     }
 }
 
+// ========== PLAYLIST DELAY MENU ==========
+void playlistDelayMenu() {
+    int selected = 0;
+    while (true) {
+        string statusStr = PLAYLIST_DELAY_ENABLED ? tr("enabled", "включена") : tr("disabled", "выключена");
+        string intervalStr = (CURRENT_LANG == LANG_RU)
+            ? ("каждое " + to_string(PLAYLIST_DELAY_INTERVAL) + " видео")
+            : ("every " + to_string(PLAYLIST_DELAY_INTERVAL) + " videos");
+        string durationStr = (CURRENT_LANG == LANG_RU)
+            ? (to_string(PLAYLIST_DELAY_DURATION) + " секунд")
+            : (to_string(PLAYLIST_DELAY_DURATION) + " seconds");
+
+        vector<string> options = {
+            tr("Delay state: ", "Состояние задержки: ") + statusStr,
+            tr("Trigger interval: ", "Через сколько видео включать: ") + intervalStr,
+            tr("Wait duration: ", "Какое время ожидать: ") + durationStr,
+            tr("Return (ESC)", "Назад (ESC)")
+        };
+
+        vector<string> hints = {
+            tr("Toggle playlist delay on or off (default: enabled)", "Переключить задержку для плейлистов (по умолчанию: включена)"),
+            tr("Interval of videos before delay triggers (default: every 10 videos)", "Через сколько видео включать паузу (по умолчанию: каждое 10 видео)"),
+            tr("How long to wait during delay (default: 30 seconds)", "Сколько секунд ожидать во время паузы (по умолчанию: 30 секунд)"),
+            tr("Return to settings menu", "Вернуться в меню настроек")
+        };
+
+        string desc = "\n" +
+            tr("Playlist delay settings:\n"
+               "This delay applies when downloading playlists to prevent YouTube\n"
+               "rate-limiting, HTTP 429 (Too Many Requests), and bot detection.\n\n"
+               "Configured with two parameters:\n"
+               "1. Trigger interval: after how many downloaded videos delay starts.\n"
+               "2. Wait duration: how long the delay lasts in seconds.",
+               "Настройка задержки для плейлистов:\n"
+               "Пауза применяется при скачивании плейлистов для предотвращения\n"
+               "блокировок YouTube по частоте запросов (HTTP 429) и проверок на бота.\n\n"
+               "Смысл настройки в указании двух параметров:\n"
+               "1. На каком по счету видео начинается задержка (интервал).\n"
+               "2. Сколько времени она длится (в секундах).");
+
+        int sel = arrowSelect(
+            tr("PLAYLIST DELAY CONFIGURATION", "НАСТРОЙКА ЗАДЕРЖКИ ПЛЕЙЛИСТА"),
+            desc,
+            options,
+            selected,
+            hints
+        );
+
+        if (sel == -1 || sel == 3) {
+            break;
+        }
+
+        selected = sel;
+
+        if (sel == 0) {
+            PLAYLIST_DELAY_ENABLED = !PLAYLIST_DELAY_ENABLED;
+            saveConfig();
+        }
+        else if (sel == 1) {
+            clearScreen();
+            printColor("========================================", CYAN);
+            printColor(" " + tr("TRIGGER INTERVAL", "ЧЕРЕЗ СКОЛЬКО ВИДЕО ВКЛЮЧАТЬ"), CYAN);
+            printColor("========================================", CYAN);
+            cout << "\n" << tr("Current setting: every ", "Текущая настройка: каждое ")
+                 << PLAYLIST_DELAY_INTERVAL << tr(" videos\n\n", " видео\n\n");
+            cout << tr("Enter number of videos (1 - 1000, or ESC to cancel): ",
+                       "Введите количество видео (1 - 1000, или ESC для отмены): ") << flush;
+            string inp;
+            if (inputLineWithEscape(inp, "")) {
+                while (!inp.empty() && (inp.front() == ' ' || inp.front() == '\t')) inp.erase(inp.begin());
+                while (!inp.empty() && (inp.back() == ' ' || inp.back() == '\t')) inp.pop_back();
+                if (!inp.empty()) {
+                    try {
+                        int val = stoi(inp);
+                        if (val >= 1 && val <= 1000) {
+                            PLAYLIST_DELAY_INTERVAL = val;
+                            saveConfig();
+                        } else {
+                            printColor("\n" + tr("[ERROR] Value must be between 1 and 1000", "[ОШИБКА] Значение должно быть от 1 до 1000"), RED);
+                            waitForKey();
+                        }
+                    } catch (...) {
+                        printColor("\n" + tr("[ERROR] Invalid number format", "[ОШИБКА] Неверный формат числа"), RED);
+                        waitForKey();
+                    }
+                }
+            }
+        }
+        else if (sel == 2) {
+            clearScreen();
+            printColor("========================================", CYAN);
+            printColor(" " + tr("WAIT DURATION", "КАКОЕ ВРЕМЯ ОЖИДАТЬ"), CYAN);
+            printColor("========================================", CYAN);
+            cout << "\n" << tr("Current setting: ", "Текущая настройка: ")
+                 << PLAYLIST_DELAY_DURATION << tr(" seconds\n\n", " секунд\n\n");
+            cout << tr("Enter wait duration in seconds (1 - 3600, or ESC to cancel): ",
+                       "Введите время ожидания в секундах (1 - 3600, или ESC для отмены): ") << flush;
+            string inp;
+            if (inputLineWithEscape(inp, "")) {
+                while (!inp.empty() && (inp.front() == ' ' || inp.front() == '\t')) inp.erase(inp.begin());
+                while (!inp.empty() && (inp.back() == ' ' || inp.back() == '\t')) inp.pop_back();
+                if (!inp.empty()) {
+                    try {
+                        int val = stoi(inp);
+                        if (val >= 1 && val <= 3600) {
+                            PLAYLIST_DELAY_DURATION = val;
+                            saveConfig();
+                        } else {
+                            printColor("\n" + tr("[ERROR] Value must be between 1 and 3600", "[ОШИБКА] Значение должно быть от 1 до 3600"), RED);
+                            waitForKey();
+                        }
+                    } catch (...) {
+                        printColor("\n" + tr("[ERROR] Invalid number format", "[ОШИБКА] Неверный формат числа"), RED);
+                        waitForKey();
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ========== SETTINGS ==========
 void settingsMenu() {
     int selected = 0;
@@ -2610,13 +2849,14 @@ void settingsMenu() {
             tr("Skip already downloaded (archive): [", "Пропускать уже скачанное (архив): [") + (USE_ARCHIVE ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) + "]",
             tr("Only audio: [", "Только аудио: [") + (ONLY_AUDIO ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) + "]",
             tr("Only video: [", "Только видео: [") + (ONLY_VIDEO ? tr("ON", "ВКЛ") : tr("OFF", "ВЫКЛ")) + "]",
+            tr("Configure delay (playlists): [", "Настроить задержку: [") + (PLAYLIST_DELAY_ENABLED ? (tr("ON (every ", "ВКЛ (каждое ") + to_string(PLAYLIST_DELAY_INTERVAL) + tr(" vids / ", " видео / ") + to_string(PLAYLIST_DELAY_DURATION) + tr("s)", "с)")) : tr("OFF", "ВЫКЛ")) + "]",
             tr("Clear download history (archive)", "Очистить историю загрузок (архив)"),
             tr("Update cookies", "Обновить куки"),
             tr("Update yt-dlp & components", "Обновить yt-dlp и компоненты"),
             tr("Return (ESC)", "Назад (ESC)")
         };
         vector<int> actions = {
-            '1', '2', '3', '4', '5', '6', '7', '8', '9', 'u', '0'
+            '1', '2', '3', '4', '5', '6', '7', '8', '9', 'c', 'u', '0'
         };
 
         clearScreen();
@@ -2628,6 +2868,8 @@ void settingsMenu() {
             string prefix = "";
             if (actions[i] >= '1' && actions[i] <= '9') {
                 prefix = string(1, (char)actions[i]) + ". ";
+            } else if (actions[i] == 'c') {
+                prefix = "c. ";
             } else if (actions[i] == 'u') {
                 prefix = "u. ";
             } else if (actions[i] == '0') {
@@ -2692,8 +2934,9 @@ void settingsMenu() {
         case '5': toggleUseArchive(); break;
         case '6': toggleOnlyAudio(); break;
         case '7': toggleOnlyVideo(); break;
-        case '8': clearArchiveMenu(); break;
-        case '9': clearScreen(); cookieEditor(true); saveConfig(); break;
+        case '8': case 'd': case 'D': playlistDelayMenu(); break;
+        case '9': clearArchiveMenu(); break;
+        case 'c': case 'C': clearScreen(); cookieEditor(true); saveConfig(); break;
         case 'u': case 'U': updateComponentsMenu(); break;
         case '0': return;
         default: break;
