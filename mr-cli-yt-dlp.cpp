@@ -34,7 +34,12 @@ enum ErrorType {
     MERGE_ERROR = 4,
     VIDEO_ERROR = 5,
     RATE_LIMIT_ERROR = 6,
-    CANCELLED_BY_USER = 7
+    CANCELLED_BY_USER = 7,
+    POT_ERROR = 8,
+    UNAVAILABLE_ERROR = 9,
+    DRM_ERROR = 10,
+    FORMAT_ERROR = 11,
+    NETWORK_ERROR = 12
 };
 
 string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH, PLUGINS_PATH;
@@ -342,6 +347,18 @@ bool createDirRecursive(const string& p) {
     if (p.empty()) return false;
     std::error_code ec;
     return fs::create_directories(fs::u8path(p), ec) || dirExists(p);
+}
+
+void openUrlInBrowser(const string& url) {
+    if (url.empty()) return;
+    wstring wUrl = utf8ToWstring(url);
+    ShellExecuteW(NULL, L"open", wUrl.c_str(), NULL, NULL, SW_SHOWNORMAL);
+}
+
+void openFolderInExplorer(const string& path) {
+    if (path.empty()) return;
+    wstring wPath = utf8ToWstring(path);
+    ShellExecuteW(NULL, L"explore", wPath.c_str(), NULL, NULL, SW_SHOWNORMAL);
 }
 
 int runProcessWait(const wstring& cmdLine) {
@@ -1084,6 +1101,7 @@ bool execWithProgress(const wstring& cmdLine) {
     string currentVideoId = "";
     bool currentVideoCompleted = false;
     string mergeErrorPath = "";
+    bool sawPotWarning = false;
     char buffer[4096];
     DWORD bytesRead = 0;
 
@@ -1266,12 +1284,6 @@ bool execWithProgress(const wstring& cmdLine) {
                         line.find("No title found in player responses") != string::npos) {
                         // Ignore harmless yt-dlp internal player response warning
                     }
-                    else if (line.find("Video unavailable. This video is private") != string::npos ||
-                        line.find("unavailable video is hidden") != string::npos ||
-                        line.find("This video is unavailable") != string::npos) {
-                        if (progressActive) { cout << endl; progressActive = false; }
-                        printColor(line, YELLOW);
-                    }
                     else if (line.find("rate-limited by YouTube") != string::npos ||
                         line.find("Your account has been rate-limited") != string::npos ||
                         line.find("HTTP Error 429") != string::npos) {
@@ -1279,26 +1291,88 @@ bool execWithProgress(const wstring& cmdLine) {
                         if (progressActive) { cout << endl; progressActive = false; }
                         printColor("\n[RATE LIMIT] " + line, RED);
                     }
+                    else if (line.find("require a GVS PO Token") != string::npos ||
+                        line.find("require a PO Token") != string::npos ||
+                        line.find("PO Token which was not provided") != string::npos ||
+                        line.find("PO-Token-Guide") != string::npos ||
+                        line.find("po_token=") != string::npos ||
+                        line.find("Sign in to confirm you're not a bot") != string::npos ||
+                        line.find("HTTP Error 403") != string::npos) {
+                        sawPotWarning = true;
+                        LAST_ERROR = POT_ERROR;
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, (line.find("ERROR") != string::npos) ? RED : YELLOW);
+                    }
+                    else if (line.find("Sign in to confirm your age") != string::npos ||
+                        line.find("age-restricted") != string::npos) {
+                        LAST_ERROR = AGE_ERROR;
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, (line.find("ERROR") != string::npos) ? RED : YELLOW);
+                    }
+                    else if (line.find("Login required") != string::npos ||
+                        line.find("invalid cookies") != string::npos ||
+                        line.find("no longer valid") != string::npos ||
+                        line.find("cookies are expired") != string::npos) {
+                        if (LAST_ERROR != POT_ERROR) {
+                            LAST_ERROR = COOKIE_ERROR;
+                        }
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, (line.find("ERROR") != string::npos) ? RED : YELLOW);
+                    }
+                    else if (line.find("This video is DRM protected") != string::npos ||
+                        line.find("DRM protected") != string::npos ||
+                        line.find("protected by DRM") != string::npos) {
+                        LAST_ERROR = DRM_ERROR;
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, RED);
+                    }
+                    else if (line.find("Video unavailable") != string::npos ||
+                        line.find("This video is private") != string::npos ||
+                        line.find("Private video") != string::npos ||
+                        line.find("unavailable video is hidden") != string::npos ||
+                        line.find("Join this channel to get access") != string::npos ||
+                        line.find("Members-only") != string::npos ||
+                        line.find("not available in your country") != string::npos ||
+                        line.find("The uploader has not made this video available") != string::npos) {
+                        if (LAST_ERROR == NOT_ERROR || LAST_ERROR == VIDEO_ERROR) {
+                            LAST_ERROR = UNAVAILABLE_ERROR;
+                        }
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, (line.find("ERROR") != string::npos) ? RED : YELLOW);
+                    }
+                    else if (line.find("This live event will begin in a few moments") != string::npos ||
+                        (line.find("is a live stream") != string::npos && line.find("has not started") != string::npos)) {
+                        LAST_ERROR = LIVE_ERROR;
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, (line.find("ERROR") != string::npos) ? RED : YELLOW);
+                    }
+                    else if (line.find("Requested format is not available") != string::npos ||
+                        line.find("No video formats found") != string::npos) {
+                        if (!sawPotWarning && (LAST_ERROR == NOT_ERROR || LAST_ERROR == VIDEO_ERROR)) {
+                            LAST_ERROR = FORMAT_ERROR;
+                        }
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, RED);
+                    }
+                    else if (line.find("Unable to download webpage") != string::npos ||
+                        line.find("Connection reset") != string::npos ||
+                        line.find("Network is unreachable") != string::npos ||
+                        line.find("IncompleteRead") != string::npos ||
+                        line.find("Remote end closed connection") != string::npos ||
+                        line.find("getaddrinfo failed") != string::npos) {
+                        if (LAST_ERROR == NOT_ERROR || LAST_ERROR == VIDEO_ERROR) {
+                            LAST_ERROR = NETWORK_ERROR;
+                        }
+                        if (progressActive) { cout << endl; progressActive = false; }
+                        printColor(line, RED);
+                    }
                     else if (line.find("ERROR") != string::npos || line.find("WARNING") != string::npos) {
                         if (progressActive) { cout << endl; progressActive = false; }
 
-                        if (line.find("Sign in to confirm you're not a bot") != string::npos ||
-                            line.find("Login required") != string::npos ||
-                            line.find("invalid cookies") != string::npos ||
-                            line.find("no longer valid") != string::npos) {
-                            LAST_ERROR = COOKIE_ERROR;
-                        }
-                        else if (line.find("Sign in to confirm your age") != string::npos) {
-                            LAST_ERROR = AGE_ERROR;
-                        }
-                        else if (line.find("This live event will begin in a few moments") != string::npos ||
-                            line.find("is a live stream") != string::npos) {
-                            if (LAST_ERROR != COOKIE_ERROR && LAST_ERROR != AGE_ERROR) {
-                                LAST_ERROR = LIVE_ERROR;
-                            }
-                        }
-                        else {
-                            if (LAST_ERROR == NOT_ERROR) {
+                        if (LAST_ERROR == NOT_ERROR) {
+                            if (sawPotWarning) {
+                                LAST_ERROR = POT_ERROR;
+                            } else {
                                 LAST_ERROR = VIDEO_ERROR;
                             }
                         }
@@ -1403,6 +1477,18 @@ bool execWithProgress(const wstring& cmdLine) {
 
     if (!currentVideoCompleted && !currentVideoId.empty() && (LAST_ERROR != NOT_ERROR || exitCode != 0)) {
         removeIdFromArchive(currentVideoId);
+    }
+
+    if (exitCode != 0 && LAST_ERROR == NOT_ERROR) {
+        if (sawPotWarning) {
+            LAST_ERROR = POT_ERROR;
+        } else {
+            LAST_ERROR = VIDEO_ERROR;
+        }
+    }
+
+    if (exitCode == 0 && !mergeFailed) {
+        LAST_ERROR = NOT_ERROR;
     }
 
     if (LAST_ERROR != NOT_ERROR) {
@@ -1649,6 +1735,96 @@ void startDownload(const string& url = "", const string& start = "", const strin
         return;
     }
 
+    if (LAST_ERROR == POT_ERROR) {
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : 1);
+        string potDesc = tr(
+            "YouTube blocked access or skipped formats because a PO Token is missing!\n\n"
+            "YouTube requires a valid Proof-of-Origin (PO) Token to confirm requests originate\n"
+            "from a genuine browser. Without it, video formats may result in HTTP 403 Forbidden\n"
+            "or 'Sign in to confirm you're not a bot'.\n\n"
+            "Recommended solutions:\n"
+            "  1. Install a POT Provider plugin (e.g. bgutil-ytdlp-pot-provider) into:\n"
+            "     " + PLUGINS_PATH + "\n"
+            "  2. Import / Update account cookies (cookies.txt)\n"
+            "  3. Official guide: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide",
+
+            "YouTube заблокировал доступ или пропустил форматы из-за отсутствия PO-токена!\n\n"
+            "YouTube требует подтверждение подлинности (Proof-of-Origin Token) для защиты от ботов.\n"
+            "Без токена форматы видео недоступны, выдают ошибку HTTP 403 Forbidden\n"
+            "или требование 'Подтвердите, что вы не бот'.\n\n"
+            "Рекомендуемые решения:\n"
+            "  1. Установить плагин генератора токенов (например, bgutil-ytdlp-pot-provider) в папку:\n"
+            "     " + PLUGINS_PATH + "\n"
+            "  2. Обновить или загрузить куки аккаунта (cookies.txt)\n"
+            "  3. Официальное руководство: https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide"
+        );
+
+        while (true) {
+            vector<string> potOptions;
+            if (isPl) {
+                potOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Open PO-Token Guide in browser", "Открыть PO-Token Guide в браузере"),
+                    tr("Open plugins folder in Explorer", "Открыть папку плагинов в Проводнике"),
+                    tr("Retry downloading this item", "Повторить попытку скачивания этого видео"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                potOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Open PO-Token Guide in browser", "Открыть PO-Token Guide в браузере"),
+                    tr("Open plugins folder in Explorer", "Открыть папку плагинов в Проводнике"),
+                    tr("Retry download", "Повторить попытку скачивания"),
+                    tr("Cancel / Return to menu", "Отмена / Вернуться в меню")
+                };
+            }
+
+            int sel = arrowSelect(tr("PO-TOKEN / BOTGUARD REQUIRED", "ТРЕБУЕТСЯ PO-ТОКЕН / ЗАЩИТА BOTGUARD"), potDesc, potOptions, 0);
+            if (sel == 0) {
+                clearScreen();
+                if (cookieEditor(false) == "continue") {
+                    LAST_ERROR = NOT_ERROR;
+                    cookieErrorHandled = false;
+                    if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                    else startDownload(u, s, e, false, true);
+                    return;
+                }
+            }
+            else if (sel == 1) {
+                openUrlInBrowser("https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide");
+                printColor("\n" + tr("[OK] PO-Token Guide opened in browser!", "[OK] Руководство PO-Token Guide открыто в браузере!"), GREEN);
+                Sleep(2000);
+            }
+            else if (sel == 2) {
+                openFolderInExplorer(PLUGINS_PATH);
+                printColor("\n" + tr("[OK] Plugins folder opened in Explorer!", "[OK] Папка плагинов открыта в Проводнике!"), GREEN);
+                Sleep(2000);
+            }
+            else if (sel == 3) {
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                else startDownload(u, s, e, false, true);
+                return;
+            }
+            else if (isPl && sel == 4) {
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [PO-Token Missing]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                return;
+            }
+        }
+    }
+
     if (LAST_ERROR == COOKIE_ERROR || LAST_ERROR == AGE_ERROR) {
         cookieErrorHandled = true;
 
@@ -1656,35 +1832,292 @@ void startDownload(const string& url = "", const string& start = "", const strin
         if (!s.empty()) {
             try { currentIndex = stoi(s); } catch (...) { currentIndex = 1; }
         }
+        if (LAST_PROCESSED_ITEM > 0) currentIndex = LAST_PROCESSED_ITEM;
 
         string reason = (LAST_ERROR == COOKIE_ERROR) ?
-            tr("YouTube requires verification (Bot check / Login required)!\nPlease update cookies or use an account cookie file.",
-               "YouTube требует подтверждения (Проверка на бота / Требуется вход)!\nПожалуйста, обновите куки или используйте файл куки аккаунта.") :
-            tr("This video has age restriction!\nPlease use account cookies that can access this video.",
-               "Это видео имеет возрастное ограничение!\nПожалуйста, используйте куки аккаунта с доступом к этому видео.");
+            tr("YouTube requires verification (Login required / Bot check)!\n"
+               "Please update cookies or use an account cookie file.\n"
+               "Cookies Guide: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp",
+               "YouTube требует подтверждения (Требуется вход / Проверка на бота)!\n"
+               "Пожалуйста, обновите куки или используйте файл куки аккаунта.\n"
+               "Инструкция по куки: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp") :
+            tr("This video has age restriction!\n"
+               "Please use account cookies with confirmed 18+ age access.\n"
+               "Cookies Guide: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp",
+               "Это видео имеет возрастное ограничение!\n"
+               "Пожалуйста, используйте куки аккаунта с подтверждённым возрастом 18+.\n"
+               "Инструкция по куки: https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp");
 
-        vector<string> ckOptions = {
-            tr("Update cookies", "Обновить куки")
-        };
-        int selCk = arrowSelect(tr("AUTHENTICATION REQUIRED", "ТРЕБУЕТСЯ АВТОРИЗАЦИЯ"), reason, ckOptions, 0);
-        if (selCk == 0) {
-            string result = cookieEditor(false);
-            if (result == "continue") {
-                cookieErrorHandled = false;
-                cout << "\n";
+        while (true) {
+            vector<string> ckOptions;
+            if (isPl) {
+                ckOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Open Cookies Guide in browser", "Открыть инструкцию по куки в браузере"),
+                    tr("Retry download for this item", "Повторить попытку для этого видео"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                ckOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Open Cookies Guide in browser", "Открыть инструкцию по куки в браузере"),
+                    tr("Retry download", "Повторить попытку скачивания"),
+                    tr("Cancel / Return to menu", "Отмена / Вернуться в меню")
+                };
+            }
+
+            int selCk = arrowSelect(tr("AUTHENTICATION REQUIRED", "ТРЕБУЕТСЯ АВТОРИЗАЦИЯ"), reason, ckOptions, 0);
+            if (selCk == 0) {
+                clearScreen();
+                string result = cookieEditor(false);
+                if (result == "continue") {
+                    cookieErrorHandled = false;
+                    cout << "\n";
+                    LAST_ERROR = NOT_ERROR;
+                    if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                    else startDownload(u, s, e, false, true);
+                    return;
+                }
+            }
+            else if (selCk == 1) {
+                openUrlInBrowser("https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp");
+                printColor("\n" + tr("[OK] Cookies Guide opened in browser!", "[OK] Инструкция по куки открыта в браузере!"), GREEN);
+                Sleep(2000);
+            }
+            else if (selCk == 2) {
                 LAST_ERROR = NOT_ERROR;
-                if (isPl) {
-                    startDownload(u, to_string(currentIndex), e, true, true);
-                }
-                else {
-                    startDownload(u, s, e, isPl, true);
-                }
+                cookieErrorHandled = false;
+                if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                else startDownload(u, s, e, false, true);
+                return;
+            }
+            else if (isPl && selCk == 3) {
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [Auth Required]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                cookieErrorHandled = false;
                 return;
             }
         }
-        LAST_ERROR = NOT_ERROR;
-        cookieErrorHandled = false;
-        return;
+    }
+
+    if (LAST_ERROR == DRM_ERROR) {
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : 1);
+        string drmDesc = tr(
+            "This video is protected by DRM (Digital Rights Management) encryption!\n\n"
+            "yt-dlp and this program cannot download DRM-protected streams\n"
+            "(e.g., paid YouTube Movies, Primetime channels, Netflix, etc.).\n"
+            "yt-dlp intentionally does not circumvent DRM protection.\n"
+            "DRM Policy: https://github.com/yt-dlp/yt-dlp#can-you-add-support-for-this-feature-request",
+
+            "Это видео защищено шифрованием DRM (Digital Rights Management)!\n\n"
+            "yt-dlp и данная программа принципиально не поддерживают скачивание DRM-контента\n"
+            "(например, платные фильмы YouTube, трансляции по платной подписке и т.д.).\n"
+            "yt-dlp намеренно не осуществляет обход или дешифровку DRM.\n"
+            "Справка yt-dlp: https://github.com/yt-dlp/yt-dlp#can-you-add-support-for-this-feature-request"
+        );
+
+        while (true) {
+            vector<string> drmOptions;
+            if (isPl) {
+                drmOptions = {
+                    tr("Open DRM FAQ in browser", "Открыть справку по DRM в браузере"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                drmOptions = {
+                    tr("Open DRM FAQ in browser", "Открыть справку по DRM в браузере"),
+                    tr("Return to menu", "Вернуться в главное меню")
+                };
+            }
+
+            int sel = arrowSelect(tr("DRM PROTECTED CONTENT", "ЗАЩИТА DRM (WIDEVINE)"), drmDesc, drmOptions, 0);
+            if (sel == 0) {
+                openUrlInBrowser("https://github.com/yt-dlp/yt-dlp#can-you-add-support-for-this-feature-request");
+                printColor("\n" + tr("[OK] DRM FAQ opened in browser!", "[OK] Справка по DRM открыта в браузере!"), GREEN);
+                Sleep(2000);
+            }
+            else if (isPl && sel == 1) {
+                LAST_ERROR = NOT_ERROR;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [DRM Protected]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                return;
+            }
+        }
+    }
+
+    if (LAST_ERROR == UNAVAILABLE_ERROR) {
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : 1);
+        string unavailDesc = tr(
+            "The requested video is unavailable!\n\n"
+            "Possible causes:\n"
+            "  - The video is private, removed, or members-only\n"
+            "  - Region restricted (uploader made it unavailable in your country)\n"
+            "  - Channel account suspended or hidden\n\n"
+            "If your account has access to this video, try updating cookies.",
+
+            "Запрошенное видео недоступно!\n\n"
+            "Возможные причины:\n"
+            "  - Видео является приватным, удалено или доступно только спонсорам\n"
+            "  - Региональная блокировка (автор ограничил просмотр в вашей стране)\n"
+            "  - Канал заблокирован или видео скрыто\n\n"
+            "Если у вашего аккаунта есть доступ к этому видео, попробуйте обновить куки."
+        );
+
+        while (true) {
+            vector<string> unavailOptions;
+            if (isPl) {
+                unavailOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                unavailOptions = {
+                    tr("Update / Import cookies", "Обновить / Загрузить куки"),
+                    tr("Return to menu", "Вернуться в главное меню")
+                };
+            }
+
+            int sel = arrowSelect(tr("VIDEO UNAVAILABLE", "ВИДЕО НЕДОСТУПНО"), unavailDesc, unavailOptions, 0);
+            if (sel == 0) {
+                clearScreen();
+                if (cookieEditor(false) == "continue") {
+                    LAST_ERROR = NOT_ERROR;
+                    if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                    else startDownload(u, s, e, false, true);
+                    return;
+                }
+            }
+            else if (isPl && sel == 1) {
+                LAST_ERROR = NOT_ERROR;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [Unavailable]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                return;
+            }
+        }
+    }
+
+    if (LAST_ERROR == FORMAT_ERROR) {
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : 1);
+        string fmtDesc = tr(
+            "The requested video format or resolution is not available!\n\n"
+            "The selected quality (resolution, FPS, or codec) does not exist for this video.\n"
+            "You can retry with the best available format automatically, or adjust quality in Settings.",
+
+            "Запрошенный формат или разрешение недоступны для этого видео!\n\n"
+            "Выбранная комбинация разрешения, FPS или кодека отсутствует у этого ролика.\n"
+            "Вы можете скачать в лучшем доступном качестве автоматически или изменить настройки."
+        );
+
+        while (true) {
+            vector<string> fmtOptions;
+            if (isPl) {
+                fmtOptions = {
+                    tr("Retry with best available format", "Скачать в наилучшем доступном качестве"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                fmtOptions = {
+                    tr("Retry with best available format", "Скачать в наилучшем доступном качестве"),
+                    tr("Return to menu", "Вернуться в главное меню")
+                };
+            }
+
+            int sel = arrowSelect(tr("FORMAT NOT AVAILABLE", "ФОРМАТ НЕДОСТУПЕН"), fmtDesc, fmtOptions, 0);
+            if (sel == 0) {
+                LAST_ERROR = NOT_ERROR;
+                string prevRes = VIDEO_RESOLUTION;
+                VIDEO_RESOLUTION = "Auto";
+                if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                else startDownload(u, s, e, false, true);
+                VIDEO_RESOLUTION = prevRes;
+                return;
+            }
+            else if (isPl && sel == 1) {
+                LAST_ERROR = NOT_ERROR;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [Format Missing]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                return;
+            }
+        }
+    }
+
+    if (LAST_ERROR == NETWORK_ERROR) {
+        int currentIndex = (LAST_PROCESSED_ITEM > 0) ? LAST_PROCESSED_ITEM : (s.empty() ? 1 : 1);
+        string netDesc = tr(
+            "A network connection error occurred while contacting YouTube!\n\n"
+            "The connection was dropped or timed out. Please check your internet\n"
+            "connection, VPN/proxy, or DNS settings.",
+
+            "Произошла сетевая ошибка при подключении к YouTube!\n\n"
+            "Связь оборвалась или превышен интервал ожидания. Пожалуйста,\n"
+            "проверьте подключение к интернету, VPN/прокси или DNS."
+        );
+
+        while (true) {
+            vector<string> netOptions;
+            if (isPl) {
+                netOptions = {
+                    tr("Retry download", "Повторить попытку скачивания"),
+                    tr("Skip this item and continue playlist", "Пропустить это видео и продолжить"),
+                    tr("Abort playlist download", "Прервать скачивание плейлиста")
+                };
+            } else {
+                netOptions = {
+                    tr("Retry download", "Повторить попытку скачивания"),
+                    tr("Return to menu", "Вернуться в главное меню")
+                };
+            }
+
+            int sel = arrowSelect(tr("NETWORK ERROR", "СЕТЕВАЯ ОШИБКА"), netDesc, netOptions, 0);
+            if (sel == 0) {
+                LAST_ERROR = NOT_ERROR;
+                if (isPl) startDownload(u, to_string(currentIndex), e, true, true);
+                else startDownload(u, s, e, false, true);
+                return;
+            }
+            else if (isPl && sel == 1) {
+                LAST_ERROR = NOT_ERROR;
+                string skippedVideo = tr("Item ", "Элемент ") + to_string(currentIndex) + " [Network Error]";
+                skippedVideos.push_back(skippedVideo);
+                int nextIndex = currentIndex + 1;
+                startDownload(u, to_string(nextIndex), e, true, true);
+                return;
+            }
+            else {
+                LAST_ERROR = NOT_ERROR;
+                return;
+            }
+        }
     }
 
     if (LAST_ERROR == LIVE_ERROR) {
@@ -1798,20 +2231,26 @@ void startDownload(const string& url = "", const string& start = "", const strin
         string desc = tr(
             "Download could not be completed!\n\n"
             "Possible reasons:\n"
-            "  - Expired / missing cookies (Login required)\n"
+            "  - Expired / missing cookies or YouTube verification\n"
             "  - Region block or Private / Deleted video\n"
             "  - Network connection issues\n"
-            "  - YouTube changed internal player algorithms",
+            "  - Outdated yt-dlp version\n"
+            "Wiki / FAQ: https://github.com/yt-dlp/yt-dlp/wiki/FAQ",
+
             "Не удалось завершить скачивание!\n\n"
             "Возможные причины:\n"
-            "  - Истёкшие или отсутствующие куки (Требуется вход)\n"
+            "  - Истёкшие или отсутствующие куки / проверка YouTube\n"
             "  - Региональная блокировка или приватное / удалённое видео\n"
             "  - Проблемы с сетевым подключением\n"
-            "  - YouTube изменил внутренние алгоритмы плеера"
+            "  - Устаревшая версия yt-dlp\n"
+            "Справка / FAQ: https://github.com/yt-dlp/yt-dlp/wiki/FAQ"
         );
         vector<string> errOptions = {
             tr("Update cookies", "Обновить куки"),
-            tr("Try updating yt-dlp", "Попробовать обновить yt-dlp")
+            tr("Try updating yt-dlp", "Попробовать обновить yt-dlp"),
+            tr("Open yt-dlp FAQ in browser", "Открыть FAQ yt-dlp в браузере"),
+            tr("Retry download", "Повторить попытку скачивания"),
+            tr("Return to menu", "Вернуться в главное меню")
         };
         int selErr = arrowSelect(tr("DOWNLOAD ERROR", "ОШИБКА СКАЧИВАНИЯ"), desc, errOptions, 0);
         if (selErr == 0) {
@@ -1838,6 +2277,19 @@ void startDownload(const string& url = "", const string& start = "", const strin
                 printColor("\n" + tr("[ERROR] Failed to update yt-dlp.", "[ОШИБКА] Не удалось обновить yt-dlp."), RED);
             }
             Sleep(1500);
+            LAST_ERROR = NOT_ERROR;
+            cookieErrorHandled = false;
+            startDownload(u, s, e, isPl, true);
+            return;
+        }
+        else if (selErr == 2) {
+            openUrlInBrowser("https://github.com/yt-dlp/yt-dlp/wiki/FAQ");
+            printColor("\n" + tr("[OK] yt-dlp FAQ opened in browser!", "[OK] FAQ yt-dlp открыт в браузере!"), GREEN);
+            Sleep(2000);
+            startDownload(u, s, e, isPl, true);
+            return;
+        }
+        else if (selErr == 3) {
             LAST_ERROR = NOT_ERROR;
             cookieErrorHandled = false;
             startDownload(u, s, e, isPl, true);
