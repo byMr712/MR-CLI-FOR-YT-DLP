@@ -37,7 +37,7 @@ enum ErrorType {
     CANCELLED_BY_USER = 7
 };
 
-string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH;
+string YTDLP_PATH, FFMPEG_PATH, QJS_PATH, SCRIPT_DIR, DOWNLOAD_PATH, CONFIG_PATH, PLUGINS_PATH;
 string COOKIES_FILE = "cookies.txt";
 string VIDEO_RESOLUTION = "1080", VIDEO_FPS = "60", VIDEO_FORMAT = "MP4(H.264)";
 string AUDIO_FORMAT = "M4A(AAC)";
@@ -2386,6 +2386,9 @@ bool checkDependencies() {
         if (!dirExists(CONFIG_PATH)) {
             createDirRecursive(CONFIG_PATH);
         }
+        if (!dirExists(PLUGINS_PATH)) {
+            createDirRecursive(PLUGINS_PATH);
+        }
 
         if (!YTDLP_FOUND) {
             printColor("\n" + tr("[INFO] Installing yt-dlp (~20MB)...", "[ИНФО] Установка yt-dlp (~20MB)..."), CYAN);
@@ -2574,6 +2577,9 @@ int main() {
         if (!dirExists(CONFIG_PATH)) createDirRecursive(CONFIG_PATH);
         if (!dirExists(DOWNLOAD_PATH)) createDirRecursive(DOWNLOAD_PATH);
     }
+
+    PLUGINS_PATH = CONFIG_PATH + "yt-dlp-plugins\\";
+    if (!dirExists(PLUGINS_PATH)) createDirRecursive(PLUGINS_PATH);
 
     ARCHIVE_PATH = getArchivePath();
     initDefaultLanguage();

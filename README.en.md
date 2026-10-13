@@ -75,7 +75,19 @@ The built-in cookie editor helps you access restricted content:
 - Paste from clipboard
 - Automatic Netscape format validation
 
-> **Note**: Currently, the program stores your cookies without encryption.
+> **Note**: The program stores cookies in encrypted form; they work only for the current Windows user.
+
+## Plugin Support (yt-dlp plugins)
+The program fully supports official and third-party plugins for `yt-dlp`. They allow extending the downloader's capabilities (for example, connecting token providers, bypassing specific restrictions, or adding new services).
+
+### How to install a plugin:
+1. Navigate to the program plugin folder (created automatically upon startup):  
+   `Documents\MR-CLI-FOR-YT-DLP\configs\yt-dlp-plugins\`
+2. Place the plugin file (`.zip` archive or plugin package folder) inside this folder.
+
+> **Note**: The standard global Windows user plugin directory is also supported: `%APPDATA%\yt-dlp\plugins\`.
+
+On the next download, the program will automatically detect and apply the installed plugins without requiring manual command-line configuration.
 
 ## Supported URLs
 - Single videos: `https://youtube.com/watch?v=...`
