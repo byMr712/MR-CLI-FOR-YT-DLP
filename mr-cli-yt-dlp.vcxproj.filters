@@ -13,15 +13,234 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Исходные файлы\core">
+      <UniqueIdentifier>{a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\services">
+      <UniqueIdentifier>{b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\ui">
+      <UniqueIdentifier>{c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Исходные файлы\app">
+      <UniqueIdentifier>{d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\core">
+      <UniqueIdentifier>{e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\domain">
+      <UniqueIdentifier>{f6a7b8c9-d0e1-2f3a-4b5c-6d7e8f9a0b1c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\services">
+      <UniqueIdentifier>{a7b8c9d0-e1f2-3a4b-5c6d-7e8f9a0b1c2d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\ui">
+      <UniqueIdentifier>{b8c9d0e1-f2a3-4b5c-6d7e-8f9a0b1c2d3e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Файлы заголовков\app">
+      <UniqueIdentifier>{c9d0e1f2-a3b4-5c6d-7e8f-9a0b1c2d3e4f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="mr-cli-yt-dlp.cpp">
       <Filter>Исходные файлы</Filter>
     </ClCompile>
+    <ClCompile Include="src\core\Clipboard.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Console.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\FileSystem.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\HttpClient.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Keyboard.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Process.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\ZipExtractor.cpp">
+      <Filter>Исходные файлы\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\ArchiveService.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\ConfigService.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\CookieService.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\DependencyManager.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\FormatBuilder.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\LocalizationService.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\Logger.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\OutputParser.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\PathProvider.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\services\YtDlpService.cpp">
+      <Filter>Исходные файлы\services</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\Dialogs.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\InputReader.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\Menu.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\ProgressRenderer.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\screens\CookieEditorScreen.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\screens\DownloadScreen.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\screens\MainMenuScreen.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\screens\SettingsScreen.cpp">
+      <Filter>Исходные файлы\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\app\Application.cpp">
+      <Filter>Исходные файлы\app</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h">
       <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\WinLibs.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Handle.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\StringUtil.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Console.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Keyboard.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Clipboard.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\FileSystem.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Process.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\HttpClient.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\ZipExtractor.hpp">
+      <Filter>Файлы заголовков\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\Types.hpp">
+      <Filter>Файлы заголовков\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\AppConfig.hpp">
+      <Filter>Файлы заголовков\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\DownloadOptions.hpp">
+      <Filter>Файлы заголовков\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\DependencyInfo.hpp">
+      <Filter>Файлы заголовков\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\domain\CookieData.hpp">
+      <Filter>Файлы заголовков\domain</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\ILogger.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\Logger.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\PathProvider.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\LocalizationService.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\ConfigService.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\ArchiveService.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\CookieService.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\FormatBuilder.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\OutputParser.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\DependencyManager.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\IDownloadObserver.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\services\YtDlpService.hpp">
+      <Filter>Файлы заголовков\services</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\Menu.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\InputReader.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\ProgressRenderer.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\Dialogs.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\screens\IScreen.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\screens\MainMenuScreen.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\screens\SettingsScreen.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\screens\CookieEditorScreen.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\screens\DownloadScreen.hpp">
+      <Filter>Файлы заголовков\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\app\AppContext.hpp">
+      <Filter>Файлы заголовков\app</Filter>
+    </ClInclude>
+    <ClInclude Include="src\app\Application.hpp">
+      <Filter>Файлы заголовков\app</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
