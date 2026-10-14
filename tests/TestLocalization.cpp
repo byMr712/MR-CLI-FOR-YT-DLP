@@ -8,11 +8,11 @@ void testLocalizationSwitch() {
 
     LocalizationService loc;
     loc.setLanguage(Language::English);
-    assert(loc.get(StrId::AppTitle) == "MR CLI FOR YT DLP v1.1.3");
+    assert(loc.get(StrId::AppTitle) == "MR CLI FOR YT-DLP");
     assert(loc.tr("Start download", "Начать скачивание") == "Start download");
 
     loc.setLanguage(Language::Russian);
-    assert(loc.get(StrId::AppTitle) == "MR CLI FOR YT DLP v1.1.3");
+    assert(loc.get(StrId::AppTitle) == "MR CLI ДЛЯ YT-DLP");
     assert(loc.tr("Start download", "Начать скачивание") == "Начать скачивание");
 
     std::cout << "[PASS] testLocalizationSwitch\n";
