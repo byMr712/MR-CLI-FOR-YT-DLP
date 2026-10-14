@@ -67,7 +67,7 @@ bool ConfigService::save(const domain::AppConfig& config) {
     unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
     f.write(reinterpret_cast<char*>(bom), sizeof(bom));
 
-    f << "DOWNLOAD_PATH=" << config.downloadPath.string() << "\n"
+    f << "DOWNLOAD_PATH=" << config.downloadPath << "\n"
       << "COOKIES_FILE=" << config.cookiesFile << "\n"
       << "USE_COOKIES=" << (config.useCookies ? "true" : "false") << "\n"
       << "VIDEO_RESOLUTION=" << config.videoResolution << "\n"

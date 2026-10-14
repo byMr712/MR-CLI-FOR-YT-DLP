@@ -1,21 +1,35 @@
 #include "OutputParser.hpp"
-#include "../core/StringUtil.hpp"
+#include "src/core/StringUtil.hpp"
 #include <sstream>
 #include <cctype>
 
 namespace mrcli::services {
 
-bool OutputParser::isAudioStream(std::string_view path, std::string_view ext) const noexcept {
-    if (ext == "m4a" || ext == "opus" || ext == "ogg" || ext == "mp3" || ext == "flac" || ext == "wav" || ext == "aac") {
+bool OutputParser::isAudioStream(std::string_view path, std::string_view ext, bool onlyAudio, bool onlyVideo) noexcept {
+    if (onlyAudio) return true;
+    if (onlyVideo) return false;
+
+    std::string extLower = std::string(ext);
+    for (char &ch : extLower) ch = static_cast<char>(tolower(static_cast<unsigned char>(ch)));
+
+    if (extLower == "m4a" || extLower == "opus" || extLower == "ogg" || extLower == "mp3" ||
+        extLower == "flac" || extLower == "wav" || extLower == "aac" || extLower == "weba" ||
+        extLower == "oga" || extLower == "mka") {
         return true;
     }
 
     static const char* audioTags[] = {
         ".f139.", ".f140.", ".f141.", ".f249.", ".f250.", ".f251.", ".f599.", ".f600.",
-        ".ba.", ".audio.", "_audio.", ".m4a.", ".opus.", ".ogg.", ".aac."
+        ".ba.", ".audio.", "_audio."
     };
     for (const char* tag : audioTags) {
         if (path.find(tag) != std::string_view::npos) return true;
+    }
+
+    if (extLower == "mp4" || extLower == "mkv" || extLower == "avi" ||
+        extLower == "flv" || extLower == "mov" || extLower == "wmv" ||
+        extLower == "ts" || extLower == "m4v") {
+        return false;
     }
 
     static const char* videoTags[] = {
@@ -90,7 +104,6 @@ domain::ErrorType OutputParser::classifyError(std::string_view line) {
         line.find("po_token=") != std::string_view::npos ||
         line.find("Sign in to confirm you're not a bot") != std::string_view::npos ||
         line.find("HTTP Error 403") != std::string_view::npos) {
-        m_sawPotWarning = true;
         return domain::ErrorType::PoToken;
     }
 
@@ -145,23 +158,39 @@ domain::ErrorType OutputParser::classifyError(std::string_view line) {
     return domain::ErrorType::None;
 }
 
-ParsedLineResult OutputParser::parseLine(std::string_view line) {
+ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, bool onlyVideo) {
     ParsedLineResult result;
     result.text = std::string(line);
 
-    if (line == "ERROR:" || line == "ERROR: ") {
+    if (line.empty() || line == "ERROR:" || line == "ERROR: ") {
         result.event = LineEvent::None;
         return result;
+    }
+
+    // Extract Video ID from extractor lines (e.g. "[youtube] aqK0FqOQtvY: ...")
+    if (line[0] == '[') {
+        size_t bClose = line.find(']');
+        if (bClose != std::string_view::npos && bClose + 2 < line.size()) {
+            size_t colon = line.find(':', bClose + 1);
+            if (colon != std::string_view::npos && colon > bClose + 2) {
+                std::string possibleId = std::string(line.substr(bClose + 2, colon - (bClose + 2)));
+                possibleId = core::StringUtil::trim(possibleId);
+                if (possibleId != "Destination" && possibleId.find(' ') == std::string::npos &&
+                    possibleId.size() >= 4 && possibleId.size() <= 64) {
+                    result.possibleVideoId = possibleId;
+                }
+            }
+        }
     }
 
     if (line.find("[download] Downloading item ") == 0) {
         int cur = 0, total = 0;
         if (sscanf_s(line.data(), "[download] Downloading item %d of %d", &cur, &total) == 2) {
             result.event = LineEvent::ItemTransition;
+            result.curItem = cur;
+            result.totalItems = total;
             result.progress.currentItem = cur;
             result.progress.totalItems = total;
-            m_currentItem = cur;
-            m_totalItems = total;
             return result;
         }
     }
@@ -174,48 +203,77 @@ ParsedLineResult OutputParser::parseLine(std::string_view line) {
     if (line.find("[download] Destination:") == 0) {
         result.event = LineEvent::Destination;
         std::string path = std::string(line.substr(23));
-        result.destinationPath = core::StringUtil::trim(path);
+        path = core::StringUtil::trim(path);
+        result.destinationPath = path;
 
-        size_t slash = result.destinationPath.find_last_of("\\/");
-        std::string name = (slash != std::string::npos) ? result.destinationPath.substr(slash + 1) : result.destinationPath;
+        size_t slash = path.find_last_of("\\/");
+        std::string name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
         size_t dot = name.find_last_of('.');
-        std::string ext = (dot != std::string::npos) ? name.substr(dot + 1) : "";
-        result.progress.isAudio = isAudioStream(result.destinationPath, ext);
+        std::string ext = "";
+        if (dot != std::string::npos) {
+            ext = name.substr(dot + 1);
+            name = name.substr(0, dot);
+        }
+
+        size_t fDot = name.find_last_of('.');
+        if (fDot != std::string::npos && fDot + 1 < name.size() && (name[fDot + 1] == 'f' || name[fDot + 1] == 'F')) {
+            bool allDigits = true;
+            for (size_t k = fDot + 2; k < name.size(); ++k) {
+                if (!isdigit(static_cast<unsigned char>(name[k]))) { allDigits = false; break; }
+            }
+            if (allDigits && fDot + 2 <= name.size()) {
+                name = name.substr(0, fDot);
+            }
+        }
+
+        result.mediaName = name;
+        result.isAudio = isAudioStream(path, ext, onlyAudio, onlyVideo);
         result.progress.mediaTitle = name;
+        result.progress.isAudio = result.isAudio;
         return result;
     }
 
     if (line.find("[Merger] Merging formats into") == 0) {
-        result.event = LineEvent::MergeStarted;
+        result.event = LineEvent::Merger;
         std::string path = std::string(line.substr(29));
-        result.destinationPath = core::StringUtil::trim(path);
+        path = core::StringUtil::trim(path);
+        if (!path.empty() && path.back() == '"') path.pop_back();
+        result.destinationPath = path;
+        result.mediaName = path;
         return result;
     }
 
     std::string pct, spd, eta;
     if (parseDownloadProgress(line, pct, spd, eta)) {
-        result.event = LineEvent::ProgressUpdate;
-        result.progress.percent = pct;
+        result.event = LineEvent::Progress;
+        result.progress.percentStr = pct;
+        try {
+            result.progress.percent = std::stod(pct);
+        } catch (...) {
+            result.progress.percent = 0.0;
+        }
         result.progress.speed = spd;
         result.progress.eta = eta;
-        result.progress.currentItem = m_currentItem;
-        result.progress.totalItems = m_totalItems;
         return result;
     }
 
     domain::ErrorType err = classifyError(line);
     if (err != domain::ErrorType::None) {
-        m_lastError = err;
-        result.event = LineEvent::ErrorDetected;
+        result.event = (line.find("ERROR") != std::string_view::npos) ? LineEvent::Error : LineEvent::Warning;
+        result.error = err;
         result.errorType = err;
         return result;
     }
 
     if (line.find("ERROR") != std::string_view::npos) {
+        result.event = LineEvent::Error;
+        result.error = domain::ErrorType::Video;
+        result.errorType = domain::ErrorType::Video;
+
         if (line.find("merge") != std::string_view::npos || line.find("Merger") != std::string_view::npos) {
             result.event = LineEvent::MergeFailed;
+            result.error = domain::ErrorType::Merge;
             result.errorType = domain::ErrorType::Merge;
-            m_lastError = domain::ErrorType::Merge;
 
             size_t q1 = line.find('"');
             if (q1 != std::string_view::npos) {
@@ -224,12 +282,7 @@ ParsedLineResult OutputParser::parseLine(std::string_view line) {
                     result.mergeErrorPath = std::string(line.substr(q1 + 1, q2 - q1 - 1));
                 }
             }
-            return result;
         }
-
-        result.event = LineEvent::ErrorDetected;
-        result.errorType = m_sawPotWarning ? domain::ErrorType::PoToken : domain::ErrorType::Video;
-        m_lastError = result.errorType;
         return result;
     }
 

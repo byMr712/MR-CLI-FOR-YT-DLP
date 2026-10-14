@@ -1,5 +1,5 @@
 #include "LocalizationService.hpp"
-#include "../core/WinLibs.hpp"
+#include "src/core/WinLibs.hpp"
 
 namespace mrcli::services {
 
@@ -73,7 +73,21 @@ void LocalizationService::initStrings() {
         { StrId::DelayDuration, { "Wait duration: ", "Какое время ожидать: " } },
         { StrId::Enabled, { "ENABLED", "ВКЛЮЧЕНО" } },
         { StrId::Disabled, { "DISABLED", "ВЫКЛЮЧЕНО" } },
-        { StrId::PressAnyKey, { "Press any key...", "Нажмите любую клавишу..." } }
+        { StrId::PressAnyKey, { "Press any key...", "Нажмите любую клавишу..." } },
+        { StrId::Copied, { "[OK] Copied: ", "[OK] Скопирован: " } },
+        { StrId::ExtractingComponents, { "[INFO] Extracting components...", "[ИНФО] Распаковка компонентов..." } },
+        { StrId::InstallingYtDlp, { "[INFO] Installing yt-dlp (~20MB)...", "[ИНФО] Установка yt-dlp (~20MB)..." } },
+        { StrId::InstallingFFmpeg, { "[INFO] Installing FFmpeg (~160MB)...", "[ИНФО] Установка FFmpeg (~160MB)..." } },
+        { StrId::InstallingQuickJS, { "[INFO] Installing QuickJS (~1MB)...", "[ИНФО] Установка QuickJS (~1MB)..." } },
+        { StrId::MergeFailedManual, { "\n[INFO] Merge failed. Trying manual FFmpeg merge...", "\n[ИНФО] Ошибка слияния. Попытка ручного слияния через FFmpeg..." } },
+        { StrId::ManualMergeRun, { "[INFO] Running manual merge: ", "[ИНФО] Запуск ручного слияния: " } },
+        { StrId::ManualMergeSuccess, { "[OK] Manual merge successful!", "[OK] Ручное слияние успешно завершено!" } },
+        { StrId::FinalFile, { "[OK] Final file: ", "[OK] Итоговый файл: " } },
+        { StrId::MergedFileCreatedAs, { "[WARNING] Merged file created as: ", "[ПРЕДУПРЕЖДЕНИЕ] Объединённый файл создан как: " } },
+        { StrId::CurrentVideoCancelled, { "\n[INFO] Current video cancelled. Skipping to next...", "\n[ИНФО] Скачивание текущего видео отменено. Переход к следующему..." } },
+        { StrId::VideoCancelledByUser, { "\n[INFO] Video download cancelled by user.", "\n[ИНФО] Скачивание видео отменено пользователем." } },
+        { StrId::AllVideosCancelledByUser, { "\n[INFO] Download of all videos cancelled by user.", "\n[ИНФО] Скачивание всех видео отменено пользователем." } },
+        { StrId::ResumingDownload, { "\n[INFO] Resuming download...", "\n[ИНФО] Возобновление скачивания..." } }
     };
 }
 

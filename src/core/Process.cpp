@@ -5,6 +5,107 @@ namespace mrcli::core {
 typedef LONG(NTAPI* pfnNtSuspendProcess)(HANDLE ProcessHandle);
 typedef LONG(NTAPI* pfnNtResumeProcess)(HANDLE ProcessHandle);
 
+Process::~Process() {
+    terminate();
+}
+
+bool Process::spawnWithPipes(const std::wstring& commandLine) {
+    auto res = launchRedirected(commandLine);
+    if (!res.success) return false;
+    m_process = std::move(res.process);
+    m_thread = std::move(res.thread);
+    m_readPipe = std::move(res.readPipe);
+    m_processId = res.processId;
+    return true;
+}
+
+void Process::suspend() noexcept {
+    if (m_process) suspendProcess(m_process.get());
+}
+
+void Process::resume() noexcept {
+    if (m_process) resumeProcess(m_process.get());
+}
+
+void Process::terminate(UINT exitCode) noexcept {
+    if (m_process) {
+        terminateProcess(m_process.get(), exitCode);
+    }
+}
+
+bool Process::readOutput(char* buffer, size_t bufferSize, size_t& bytesRead) {
+    bytesRead = 0;
+    if (!m_readPipe) return false;
+
+    DWORD bytesAvail = 0;
+    if (!PeekNamedPipe(m_readPipe.get(), nullptr, 0, nullptr, &bytesAvail, nullptr)) {
+        return false;
+    }
+
+    if (bytesAvail == 0) {
+        return true;
+    }
+
+    DWORD dwRead = 0;
+    DWORD toRead = static_cast<DWORD>((bufferSize < bytesAvail) ? bufferSize : bytesAvail);
+    if (!ReadFile(m_readPipe.get(), buffer, toRead, &dwRead, nullptr)) {
+        return false;
+    }
+    bytesRead = dwRead;
+    return true;
+}
+
+bool Process::isRunning() const noexcept {
+    if (!m_process) return false;
+    DWORD exitCode = 0;
+    if (GetExitCodeProcess(m_process.get(), &exitCode)) {
+        return exitCode == STILL_ACTIVE;
+    }
+    return false;
+}
+
+int Process::waitForExit() {
+    if (!m_process) return -1;
+    WaitForSingleObject(m_process.get(), INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(m_process.get(), &exitCode);
+    m_readPipe.reset();
+    m_thread.reset();
+    m_process.reset();
+    return static_cast<int>(exitCode);
+}
+
+int Process::executeWait(const std::wstring& cmd) {
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    std::wstring mutableCmd = cmd;
+    BOOL ok = CreateProcessW(
+        nullptr,
+        mutableCmd.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        0,
+        nullptr,
+        nullptr,
+        &si,
+        &pi
+    );
+    if (!ok) return -1;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 0;
+    GetExitCodeProcess(pi.hProcess, &exitCode);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return static_cast<int>(exitCode);
+}
+
 ProcessLaunchResult Process::launchRedirected(const std::wstring& commandLine) {
     ProcessLaunchResult res;
 

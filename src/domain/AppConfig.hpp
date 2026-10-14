@@ -1,12 +1,11 @@
 #pragma once
 #include "Types.hpp"
 #include <string>
-#include <filesystem>
 
 namespace mrcli::domain {
 
 struct AppConfig {
-    std::filesystem::path downloadPath;
+    std::string downloadPath;
     std::string cookiesFile{"cookies.txt"};
     bool useCookies{true};
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "../domain/Types.hpp"
+#include "src/domain/Types.hpp"
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -44,7 +44,21 @@ enum class StrId {
     DelayDuration,
     Enabled,
     Disabled,
-    PressAnyKey
+    PressAnyKey,
+    Copied,
+    ExtractingComponents,
+    InstallingYtDlp,
+    InstallingFFmpeg,
+    InstallingQuickJS,
+    MergeFailedManual,
+    ManualMergeRun,
+    ManualMergeSuccess,
+    FinalFile,
+    MergedFileCreatedAs,
+    CurrentVideoCancelled,
+    VideoCancelledByUser,
+    AllVideosCancelledByUser,
+    ResumingDownload
 };
 
 class LocalizationService {

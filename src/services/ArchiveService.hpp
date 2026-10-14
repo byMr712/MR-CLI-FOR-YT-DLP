@@ -9,6 +9,7 @@ public:
     explicit ArchiveService(std::filesystem::path archiveFilePath);
 
     [[nodiscard]] std::filesystem::path getPath() const noexcept { return m_archivePath; }
+    [[nodiscard]] std::string getArchivePath() const { return m_archivePath.u8string(); }
     [[nodiscard]] bool exists() const noexcept;
     
     bool clear() noexcept;

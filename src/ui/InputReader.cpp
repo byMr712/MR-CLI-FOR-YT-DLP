@@ -50,7 +50,7 @@ bool InputReader::inputLineWithEscape(std::string& outLine, const std::string& p
 }
 
 void InputReader::waitForKey() {
-    core::Keyboard::readWideChar();
+    (void)core::Keyboard::readWideChar();
 }
 
 } // namespace mrcli::ui

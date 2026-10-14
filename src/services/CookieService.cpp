@@ -1,7 +1,7 @@
 #include "CookieService.hpp"
-#include "../core/WinLibs.hpp"
-#include "../core/FileSystem.hpp"
-#include "../core/StringUtil.hpp"
+#include "src/core/WinLibs.hpp"
+#include "src/core/FileSystem.hpp"
+#include "src/core/StringUtil.hpp"
 #include <fstream>
 #include <sstream>
 
@@ -16,8 +16,8 @@ TempCookieScope::~TempCookieScope() {
     }
 }
 
-CookieService::CookieService(std::filesystem::path encryptedDatPath, std::filesystem::path legacyTxtPath)
-    : m_encryptedDatPath(std::move(encryptedDatPath)), m_legacyTxtPath(std::move(legacyTxtPath)) {}
+CookieService::CookieService(std::filesystem::path legacyTxtPath, std::filesystem::path encryptedDatPath, std::shared_ptr<ILogger> logger)
+    : m_legacyTxtPath(std::move(legacyTxtPath)), m_encryptedDatPath(std::move(encryptedDatPath)), m_logger(std::move(logger)) {}
 
 bool CookieService::hasCookies() const noexcept {
     return core::FileSystem::fileExists(m_encryptedDatPath) || core::FileSystem::fileExists(m_legacyTxtPath);
@@ -54,7 +54,6 @@ std::string CookieService::loadDecryptedCookies() const {
         }
     }
 
-    // Fallback / legacy plaintext migration
     if (core::FileSystem::fileExists(m_legacyTxtPath)) {
         std::ifstream legacyFile(m_legacyTxtPath, std::ios::binary);
         if (legacyFile.is_open()) {
@@ -93,6 +92,32 @@ bool CookieService::saveEncryptedCookies(std::string_view netscapeContent) {
     return true;
 }
 
+bool CookieService::saveCookies(std::string_view netscapeContent) {
+    std::string fullCookies = std::string(netscapeContent);
+    if (fullCookies.find("# Netscape HTTP Cookie File") == std::string::npos && fullCookies.find("[") != 0) {
+        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.3\n\n" + fullCookies;
+    }
+
+    core::FileSystem::createDirectories(m_legacyTxtPath.parent_path());
+    std::ofstream txtOut(m_legacyTxtPath, std::ios::binary | std::ios::trunc);
+    if (txtOut.is_open()) {
+        txtOut.write(fullCookies.data(), fullCookies.size());
+        txtOut.close();
+    }
+
+    saveEncryptedCookies(fullCookies);
+    return core::FileSystem::fileExists(m_legacyTxtPath);
+}
+
+bool CookieService::loadFromFile(const std::filesystem::path& sourceFile) {
+    return importFromFile(sourceFile);
+}
+
+void CookieService::deleteCookies() {
+    core::FileSystem::removeFile(m_legacyTxtPath);
+    core::FileSystem::removeFile(m_encryptedDatPath);
+}
+
 std::unique_ptr<TempCookieScope> CookieService::exportToTempFile() const {
     std::string content = loadDecryptedCookies();
     if (content.empty()) return nullptr;
@@ -125,10 +150,19 @@ bool CookieService::isNetscapeLine(std::string_view line) {
     for (char c : line) {
         if (c == '\t') tabCount++;
     }
-    return tabCount >= 6;
+    return tabCount >= 5;
 }
 
 bool CookieService::validateNetscapeFormat(std::string_view content, size_t* outValidLines) {
+    if (content.find("# Netscape HTTP Cookie File") != std::string_view::npos) {
+        if (outValidLines) *outValidLines = 1;
+        return true;
+    }
+    if (content.find("\"domain\":") != std::string_view::npos && content.find("\"name\":") != std::string_view::npos) {
+        if (outValidLines) *outValidLines = 1;
+        return true;
+    }
+
     std::istringstream stream{std::string(content)};
     std::string line;
     size_t validCount = 0;
@@ -154,7 +188,7 @@ bool CookieService::importFromFile(const std::filesystem::path& sourceFile) {
     inFile.close();
 
     if (!validateNetscapeFormat(content)) return false;
-    return saveEncryptedCookies(content);
+    return saveCookies(content);
 }
 
 } // namespace mrcli::services

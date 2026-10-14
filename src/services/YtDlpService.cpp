@@ -238,7 +238,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         currentVideoCompleted = false;
                     }
 
-                    if (parseRes.event == domain::LineEvent::ItemTransition) {
+                    if (parseRes.event == LineEvent::ItemTransition) {
                         if (curItem > 0 && parseRes.curItem != curItem) {
                             playlistItemsProcessed++;
                             if (config.playlistDelayEnabled && config.playlistDelayInterval > 0 && config.playlistDelayDuration > 0) {
@@ -263,18 +263,18 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         result.lastProcessedItem = curItem;
                         isPlaylist = (totalItems > 0);
                     }
-                    else if (parseRes.event == domain::LineEvent::Destination) {
+                    else if (parseRes.event == LineEvent::Destination) {
                         if (observer) {
                             observer->onMediaItemStarted(curItem, totalItems, parseRes.mediaName, parseRes.isAudio);
                         }
                     }
-                    else if (parseRes.event == domain::LineEvent::Merger) {
+                    else if (parseRes.event == LineEvent::Merger) {
                         currentVideoCompleted = true;
                         if (observer) {
                             observer->onMergeStarted(parseRes.mediaName);
                         }
                     }
-                    else if (parseRes.event == domain::LineEvent::Progress) {
+                    else if (parseRes.event == LineEvent::Progress) {
                         if (parseRes.progress.percent >= 99.9 && (config.onlyAudio || config.onlyVideo)) {
                             currentVideoCompleted = true;
                         }
@@ -282,7 +282,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                             observer->onProgress(parseRes.progress);
                         }
                     }
-                    else if (parseRes.event == domain::LineEvent::Warning || parseRes.event == domain::LineEvent::Error) {
+                    else if (parseRes.event == LineEvent::Warning || parseRes.event == LineEvent::Error) {
                         if (parseRes.error != domain::ErrorType::None) {
                             result.error = parseRes.error;
                             if (parseRes.error == domain::ErrorType::PoTokenBotguard) {
@@ -300,7 +300,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                             }
                         }
                         if (observer) {
-                            observer->onMessage(line, parseRes.event == domain::LineEvent::Error ? domain::LogLevel::Error : domain::LogLevel::Warning);
+                            observer->onMessage(line, parseRes.event == LineEvent::Error ? domain::LogLevel::Error : domain::LogLevel::Warning);
                         }
                     }
 

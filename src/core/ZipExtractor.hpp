@@ -9,6 +9,13 @@ public:
         const std::filesystem::path& zipFilePath,
         const std::filesystem::path& destinationDirectory
     );
+
+    static bool extractZip(
+        const std::filesystem::path& zipFilePath,
+        const std::filesystem::path& destinationDirectory
+    ) {
+        return extract(zipFilePath, destinationDirectory);
+    }
 };
 
 } // namespace mrcli::core
