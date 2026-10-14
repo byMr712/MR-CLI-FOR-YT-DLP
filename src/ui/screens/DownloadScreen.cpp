@@ -438,10 +438,9 @@ void DownloadScreen::start(const std::string& url,
             while (!targetDir.empty() && (targetDir.back() == '\\' || targetDir.back() == '/')) {
                 targetDir.pop_back();
             }
-            core::Console::print("============================================", core::ConsoleColor::Green);
+            std::cout << "\n";
             core::Console::print(m_ctx.loc->tr("[OK] Videos processed and saved to:", "[OK] Видео обработаны и сохранены по пути:"), core::ConsoleColor::Green);
             core::Console::print("\"" + targetDir + "\"", core::ConsoleColor::Green);
-            core::Console::print("============================================", core::ConsoleColor::Green);
             InputReader::waitForKey();
             return;
         }
@@ -477,10 +476,9 @@ void DownloadScreen::start(const std::string& url,
     while (!targetDir.empty() && (targetDir.back() == '\\' || targetDir.back() == '/')) {
         targetDir.pop_back();
     }
-    core::Console::print("============================================", core::ConsoleColor::Green);
+    std::cout << "\n";
     core::Console::print(m_ctx.loc->tr("[OK] Videos processed and saved to:", "[OK] Видео обработаны и сохранены по пути:"), core::ConsoleColor::Green);
     core::Console::print("\"" + targetDir + "\"", core::ConsoleColor::Green);
-    core::Console::print("============================================", core::ConsoleColor::Green);
     InputReader::waitForKey();
 }
 
