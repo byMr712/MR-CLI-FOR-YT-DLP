@@ -21,15 +21,20 @@ void ProgressRenderer::renderProgressBar(const domain::ProgressInfo& info, const
     }
     std::cout << "] ";
 
-    std::cout << std::fixed << std::setprecision(1) << percent << "%";
+    std::cout << std::fixed << std::setprecision(1);
+    if (percent < 10.0) std::cout << "  ";
+    else if (percent < 100.0) std::cout << " ";
+    std::cout << percent << "%";
 
     if (!info.speed.empty()) {
         std::cout << "  " << info.speed;
     }
     if (!info.eta.empty()) {
-        std::cout << "  " << etaLabel << info.eta;
+        std::cout << "  " << etaLabel << info.eta << "        ";
+    } else {
+        std::cout << "                        ";
     }
-    std::cout << "        " << std::flush;
+    std::cout << std::flush;
 }
 
 void ProgressRenderer::renderComponentProgress(const std::string& label, double percent, const std::string& extraInfo) {
@@ -61,7 +66,6 @@ bool ProgressRenderer::renderDelayCountdown(int completedCount, int durationSeco
                                            const std::function<std::string(const std::string&, const std::string&)>& tr) {
     if (durationSeconds <= 0) return true;
 
-    std::cout << "\n";
     core::Console::print("----------------------------------------------------------------------", core::ConsoleColor::Cyan);
     core::Console::setColor(core::ConsoleColor::Yellow);
     std::cout << " [!] " << tr("Playlist delay: ", "Задержка для плейлиста: ")

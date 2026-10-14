@@ -240,6 +240,9 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
 
                     if (parseRes.event == LineEvent::ItemTransition) {
                         if (curItem > 0 && parseRes.curItem != curItem) {
+                            if (observer) {
+                                observer->onItemTransition(parseRes.curItem, parseRes.totalItems);
+                            }
                             playlistItemsProcessed++;
                             if (config.playlistDelayEnabled && config.playlistDelayInterval > 0 && config.playlistDelayDuration > 0) {
                                 if (playlistItemsProcessed % config.playlistDelayInterval == 0) {
@@ -262,6 +265,14 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         result.totalItems = totalItems;
                         result.lastProcessedItem = curItem;
                         isPlaylist = (totalItems > 0);
+                    }
+                    else if (parseRes.event == LineEvent::AlreadyInArchive) {
+                        currentVideoCompleted = true;
+                        if (observer) {
+                            observer->onMessage(m_loc->tr("[OK] Video already downloaded (in archive, skipping).",
+                                                          "[OK] Видео уже скачано (в архиве, пропуск)."),
+                                                domain::LogLevel::Info);
+                        }
                     }
                     else if (parseRes.event == LineEvent::Destination) {
                         if (observer) {

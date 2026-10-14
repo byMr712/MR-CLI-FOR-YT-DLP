@@ -23,11 +23,25 @@ void DownloadScreen::onProgress(const domain::ProgressInfo& info) {
     m_progressActive = true;
 }
 
+void DownloadScreen::onItemTransition(int current, int total) {
+    if (m_progressActive) {
+        std::cout << "\n";
+        m_progressActive = false;
+    }
+    std::cout << "\n";
+    m_lastMediaItemIndex = current;
+}
+
 void DownloadScreen::onMediaItemStarted(int current, int total, const std::string& name, bool isAudio) {
     if (m_progressActive) {
         std::cout << "\n";
         m_progressActive = false;
     }
+    if (total > 0 && current > 1 && m_lastMediaItemIndex > 0 && current != m_lastMediaItemIndex) {
+        std::cout << "\n";
+    }
+    m_lastMediaItemIndex = current;
+
     std::string mediaType = isAudio ? m_ctx.loc->tr("Audio", "Аудио") : m_ctx.loc->tr("Video", "Видео");
     if (total > 0) {
         core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + mediaType + " " +
@@ -197,6 +211,8 @@ void DownloadScreen::start(const std::string& url,
     opts.isPlaylist = isPl;
 
     m_ctx.dependencyManager->refreshStatus();
+    m_progressActive = false;
+    m_lastMediaItemIndex = 0;
     auto result = m_ctx.ytDlpService->execute(m_ctx.config, opts, m_ctx.dependencyManager->getStatus(), this);
 
     if (m_progressActive) {

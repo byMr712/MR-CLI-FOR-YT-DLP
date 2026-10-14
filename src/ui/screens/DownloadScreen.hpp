@@ -19,6 +19,7 @@ public:
 
     // IDownloadObserver implementation
     void onProgress(const domain::ProgressInfo& info) override;
+    void onItemTransition(int current, int total) override;
     void onMediaItemStarted(int current, int total, const std::string& name, bool isAudio) override;
     void onMergeStarted(const std::string& outputPath) override;
     void onMessage(const std::string& message, domain::LogLevel level) override;
@@ -28,6 +29,7 @@ public:
 private:
     app::AppContext& m_ctx;
     bool m_progressActive = false;
+    int m_lastMediaItemIndex = 0;
     std::vector<std::string> m_skippedVideos;
 };
 
