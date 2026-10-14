@@ -154,7 +154,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
 
     core::Process process;
     if (!process.spawnWithPipes(cmd)) {
-        m_logger->error("Failed to launch yt-dlp process! Error code: " + std::to_string(GetLastError()));
+        m_logger->error(m_loc->tr("Failed to launch yt-dlp process! Error code: ", "Не удалось запустить процесс yt-dlp! Код ошибки: ") + std::to_string(GetLastError()));
         result.error = domain::ErrorType::GenericVideoError;
         return result;
     }

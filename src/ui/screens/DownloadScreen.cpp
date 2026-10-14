@@ -30,10 +30,10 @@ void DownloadScreen::onMediaItemStarted(int current, int total, const std::strin
     }
     std::string mediaType = isAudio ? m_ctx.loc->tr("Audio", "Аудио") : m_ctx.loc->tr("Video", "Видео");
     if (total > 0) {
-        m_ctx.logger->info(m_ctx.loc->tr("Downloading ", "Скачивание ") + mediaType + " " +
-                           std::to_string(current) + m_ctx.loc->tr(" of ", " из ") + std::to_string(total) + " - " + name);
+        core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + mediaType + " " +
+                             std::to_string(current) + m_ctx.loc->tr(" of ", " из ") + std::to_string(total) + " - " + name, core::ConsoleColor::Cyan);
     } else {
-        m_ctx.logger->info(m_ctx.loc->tr("Downloading ", "Скачивание ") + mediaType + m_ctx.loc->tr(" into \"", " в \"") + name + "\"");
+        core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + mediaType + m_ctx.loc->tr(" into \"", " в \"") + name + "\"", core::ConsoleColor::Cyan);
     }
 }
 
@@ -42,7 +42,7 @@ void DownloadScreen::onMergeStarted(const std::string& outputPath) {
         std::cout << "\n";
         m_progressActive = false;
     }
-    m_ctx.logger->info(m_ctx.loc->tr("[Merger] Merging video and audio into \"", "[Слияние] Объединение видео и аудио в \"") + outputPath + "\"");
+    core::Console::print(m_ctx.loc->tr("[Merger] Merging video and audio into \"", "[Слияние] Объединение видео и аудио в \"") + outputPath + "\"", core::ConsoleColor::Cyan);
 }
 
 void DownloadScreen::onMessage(const std::string& message, domain::LogLevel level) {
@@ -272,7 +272,8 @@ void DownloadScreen::start(const std::string& url,
                 start(u, isPl ? std::to_string(currentIndex) : s, e, isPl, true);
                 return;
             } else if (isPl && sel == 4) {
-                m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [PO-Token Missing]");
+                m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                          m_ctx.loc->tr(" [PO-Token Missing]", " [PO-Token отсутствует]"));
                 start(u, std::to_string(currentIndex + 1), e, true, true);
                 return;
             } else {
@@ -299,7 +300,8 @@ void DownloadScreen::start(const std::string& url,
                 start(u, isPl ? std::to_string(currentIndex) : s, e, isPl, true);
                 return;
             } else if (isPl && sel == 3) {
-                m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [Auth Required]");
+                m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                          m_ctx.loc->tr(" [Auth Required]", " [Требуется авторизация]"));
                 start(u, std::to_string(currentIndex + 1), e, true, true);
                 return;
             } else {
@@ -315,7 +317,8 @@ void DownloadScreen::start(const std::string& url,
             core::FileSystem::openUrlInBrowser("https://github.com/yt-dlp/yt-dlp#can-you-add-support-for-this-feature-request");
             Sleep(2000);
         } else if (isPl && sel == 1) {
-            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [DRM Protected]");
+            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                      m_ctx.loc->tr(" [DRM Protected]", " [Защита DRM]"));
             start(u, std::to_string(currentIndex + 1), e, true, true);
         }
         return;
@@ -330,7 +333,8 @@ void DownloadScreen::start(const std::string& url,
                 start(u, isPl ? std::to_string(currentIndex) : s, e, isPl, true);
             }
         } else if (isPl && sel == 1) {
-            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [Unavailable]");
+            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                      m_ctx.loc->tr(" [Unavailable]", " [Недоступно]"));
             start(u, std::to_string(currentIndex + 1), e, true, true);
         }
         return;
@@ -345,7 +349,8 @@ void DownloadScreen::start(const std::string& url,
             start(u, isPl ? std::to_string(currentIndex) : s, e, isPl, true);
             m_ctx.config.videoResolution = prevRes;
         } else if (isPl && sel == 1) {
-            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [Format Missing]");
+            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                      m_ctx.loc->tr(" [Format Missing]", " [Формат недоступен]"));
             start(u, std::to_string(currentIndex + 1), e, true, true);
         }
         return;
@@ -357,7 +362,8 @@ void DownloadScreen::start(const std::string& url,
         if (sel == 0) {
             start(u, isPl ? std::to_string(currentIndex) : s, e, isPl, true);
         } else if (isPl && sel == 1) {
-            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) + " [Network Error]");
+            m_skippedVideos.push_back(m_ctx.loc->tr("Item ", "Элемент ") + std::to_string(currentIndex) +
+                                      m_ctx.loc->tr(" [Network Error]", " [Сетевая ошибка]"));
             start(u, std::to_string(currentIndex + 1), e, true, true);
         }
         return;

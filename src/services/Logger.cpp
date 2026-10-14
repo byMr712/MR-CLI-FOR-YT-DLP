@@ -1,4 +1,5 @@
 #include "Logger.hpp"
+#include "LocalizationService.hpp"
 #include "../core/Console.hpp"
 #include <iostream>
 
@@ -18,22 +19,24 @@ void ConsoleLogger::log(LogLevel level, std::string_view message) {
     core::ConsoleColor color = core::ConsoleColor::White;
     std::string prefix;
 
+    bool isRu = (m_loc && m_loc->getLanguage() == domain::Language::Russian);
+
     switch (level) {
         case LogLevel::Debug:
             color = core::ConsoleColor::Blue;
-            prefix = "[DEBUG] ";
+            prefix = isRu ? "[ОТЛАДКА] " : "[DEBUG] ";
             break;
         case LogLevel::Info:
             color = core::ConsoleColor::Yellow;
-            prefix = "[INFO] ";
+            prefix = isRu ? "[ИНФО] " : "[INFO] ";
             break;
         case LogLevel::Warning:
             color = core::ConsoleColor::Yellow;
-            prefix = "[WARNING] ";
+            prefix = isRu ? "[ПРЕДУПРЕЖДЕНИЕ] " : "[WARNING] ";
             break;
         case LogLevel::Error:
             color = core::ConsoleColor::Red;
-            prefix = "[ERROR] ";
+            prefix = isRu ? "[ОШИБКА] " : "[ERROR] ";
             break;
         case LogLevel::Success:
             color = core::ConsoleColor::Green;
@@ -47,28 +50,25 @@ void ConsoleLogger::log(LogLevel level, std::string_view message) {
     }
     std::string_view checkView = std::string_view(trimmedMsg).substr(contentStart);
 
-    auto hasPrefix = [](std::string_view s, std::string_view p) {
-        return s.rfind(p, 0) == 0;
-    };
+    if (!checkView.empty() && checkView[0] == '[') {
+        size_t closeBracket = checkView.find(']');
+        if (closeBracket != std::string_view::npos && closeBracket <= 30) {
+            prefix.clear();
 
-    if (hasPrefix(checkView, "[INFO]") || hasPrefix(checkView, "[ИНФО]") ||
-        hasPrefix(checkView, "[WARNING]") || hasPrefix(checkView, "[ПРЕДУПРЕЖДЕНИЕ]") ||
-        hasPrefix(checkView, "[ERROR]") || hasPrefix(checkView, "[ОШИБКА]") ||
-        hasPrefix(checkView, "[OK]") ||
-        hasPrefix(checkView, "[DEBUG]") || hasPrefix(checkView, "[ОТЛАДКА]")) {
-
-        prefix.clear();
-
-        if (hasPrefix(checkView, "[OK]")) {
-            color = core::ConsoleColor::Green;
-        } else if (hasPrefix(checkView, "[ERROR]") || hasPrefix(checkView, "[ОШИБКА]")) {
-            color = core::ConsoleColor::Red;
-        } else if (hasPrefix(checkView, "[DEBUG]") || hasPrefix(checkView, "[ОТЛАДКА]")) {
-            color = core::ConsoleColor::Blue;
-        } else if (hasPrefix(checkView, "[WARNING]") || hasPrefix(checkView, "[ПРЕДУПРЕЖДЕНИЕ]")) {
-            color = core::ConsoleColor::Yellow;
-        } else if (hasPrefix(checkView, "[INFO]") || hasPrefix(checkView, "[ИНФО]")) {
-            color = (level == LogLevel::Success) ? core::ConsoleColor::Green : core::ConsoleColor::Yellow;
+            std::string_view tag = checkView.substr(0, closeBracket + 1);
+            if (tag == "[OK]") {
+                color = core::ConsoleColor::Green;
+            } else if (tag == "[ERROR]" || tag == "[ОШИБКА]") {
+                color = core::ConsoleColor::Red;
+            } else if (tag == "[DEBUG]" || tag == "[ОТЛАДКА]") {
+                color = core::ConsoleColor::Blue;
+            } else if (tag == "[WARNING]" || tag == "[ПРЕДУПРЕЖДЕНИЕ]") {
+                color = core::ConsoleColor::Yellow;
+            } else if (tag == "[INFO]" || tag == "[ИНФО]") {
+                color = (level == LogLevel::Success) ? core::ConsoleColor::Green : core::ConsoleColor::Yellow;
+            } else if (tag == "[Merger]" || tag == "[Слияние]") {
+                color = core::ConsoleColor::Cyan;
+            }
         }
     }
 

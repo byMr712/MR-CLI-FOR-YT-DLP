@@ -36,6 +36,9 @@ bool Application::initialize() {
 
     m_ctx.loc->setLanguage(m_ctx.config.language);
     ui::Menu::setLocalization(m_ctx.loc.get());
+    if (auto cl = std::dynamic_pointer_cast<services::ConsoleLogger>(m_ctx.logger)) {
+        cl->setLocalization(m_ctx.loc.get());
+    }
 
     m_ctx.archiveService = std::make_shared<services::ArchiveService>(m_ctx.paths->getArchiveFile());
     m_ctx.cookieService = std::make_shared<services::CookieService>(

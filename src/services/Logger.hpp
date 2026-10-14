@@ -4,8 +4,12 @@
 
 namespace mrcli::services {
 
+class LocalizationService;
+
 class ConsoleLogger : public ILogger {
 public:
+    void setLocalization(const LocalizationService* loc) noexcept { m_loc = loc; }
+
     void log(LogLevel level, std::string_view message) override;
     void info(std::string_view message) override;
     void warn(std::string_view message) override;
@@ -14,6 +18,7 @@ public:
 
 private:
     std::mutex m_mutex;
+    const LocalizationService* m_loc = nullptr;
 };
 
 } // namespace mrcli::services
