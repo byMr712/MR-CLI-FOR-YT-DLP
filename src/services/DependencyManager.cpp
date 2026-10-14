@@ -107,7 +107,7 @@ bool DependencyManager::downloadAndExtractTool(const std::string& name,
     core::FileSystem::createDirectories(configPath);
 
     core::HttpClient http;
-    auto progressCb = [&](size_t downloaded, size_t total) {
+    auto progressCb = [&](uint64_t downloaded, uint64_t total) {
         if (total > 0) {
             double pct = (static_cast<double>(downloaded) / static_cast<double>(total)) * 100.0;
             double curMB = static_cast<double>(downloaded) / 1048576.0;

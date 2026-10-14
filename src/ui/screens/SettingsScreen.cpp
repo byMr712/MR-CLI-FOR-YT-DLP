@@ -128,7 +128,7 @@ void SettingsScreen::selectAudioQuality() {
     auto& loc = *m_ctx.loc;
 
     std::vector<std::string> opts = {
-        "M4A (AAC) - Recommended",
+        "M4A (AAC) - " + loc.tr("Recommended", "Рекомендуется"),
         "Opus (WEBM)",
         "Vorbis (OGG)"
     };

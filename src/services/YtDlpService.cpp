@@ -181,7 +181,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                 int action = observer ? observer->onPauseRequested(isPlaylist || totalItems > 1) : 0;
 
                 if (action == 0) {
-                    m_logger->info(m_loc->get(StrId::ResumingDownload));
+                    m_logger->success(m_loc->get(StrId::ResumingDownload));
                     process.resume();
                     continue;
                 }

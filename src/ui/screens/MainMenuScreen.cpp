@@ -28,7 +28,7 @@ char MainMenuScreen::renderMenu() {
     while (true) {
         core::Console::clear();
         core::Console::print("========================================", core::ConsoleColor::Cyan);
-        core::Console::print(" MR CLI FOR YT DLP v1.1.4", core::ConsoleColor::Cyan);
+        core::Console::print(loc.tr(" MR CLI FOR YT-DLP v1.1.4", " MR CLI ДЛЯ YT-DLP v1.1.4"), core::ConsoleColor::Cyan);
         core::Console::print("========================================", core::ConsoleColor::Cyan);
         core::Console::print("========================================", core::ConsoleColor::Green);
         core::Console::print(" YT-DLP:  " + std::string(deps.ytDlpInstalled ? loc.tr("[OK] installed", "[OK] установлен") : loc.tr("[ERROR] not found", "[ОШИБКА] не найден")),

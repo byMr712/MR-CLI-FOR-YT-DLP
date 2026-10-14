@@ -237,7 +237,8 @@ ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, 
         result.event = LineEvent::Merger;
         std::string path = std::string(line.substr(29));
         path = core::StringUtil::trim(path);
-        if (!path.empty() && path.back() == '"') path.pop_back();
+        while (!path.empty() && (path.front() == '"' || path.front() == '\'')) path.erase(path.begin());
+        while (!path.empty() && (path.back() == '"' || path.back() == '\'')) path.pop_back();
         result.destinationPath = path;
         result.mediaName = path;
         return result;

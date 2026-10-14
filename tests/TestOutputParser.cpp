@@ -54,12 +54,26 @@ void testOutputParserDestinationCleanup() {
     std::cout << "[PASS] testOutputParserDestinationCleanup\n";
 }
 
+void testOutputParserMergerQuotes() {
+    using namespace mrcli::services;
+    using namespace mrcli::domain;
+
+    std::string line = "[Merger] Merging formats into \"C:\\downloads\\video.mp4\"";
+    auto result = OutputParser::parseLine(line, false, false);
+
+    assert(result.event == LineEvent::Merger);
+    assert(result.mediaName == "C:\\downloads\\video.mp4");
+    assert(result.destinationPath == "C:\\downloads\\video.mp4");
+    std::cout << "[PASS] testOutputParserMergerQuotes\n";
+}
+
 int main() {
     std::cout << "Running OutputParser tests...\n";
     testOutputParserProgress();
     testOutputParserItemTransition();
     testOutputParserPoTokenError();
     testOutputParserDestinationCleanup();
+    testOutputParserMergerQuotes();
     std::cout << "All OutputParser tests passed successfully!\n";
     return 0;
 }

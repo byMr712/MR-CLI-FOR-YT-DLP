@@ -71,7 +71,18 @@ int DownloadScreen::onPauseRequested(bool isMultiVideo) {
     if (isMultiVideo) {
         pauseOptions.push_back(m_ctx.loc->tr("Cancel download of all videos", "Отменить скачивание всех видео"));
     }
-    return Menu::inlineMenuSelect(pauseOptions);
+
+    std::string countStr = std::to_string(pauseOptions.size());
+    std::string hint1 = m_ctx.loc->tr(
+        " Arrows to select - Enter to confirm",
+        " Стрелочки для выбор - ввод для подтверждения"
+    );
+    std::string hint2 = m_ctx.loc->tr(
+        " Or numbers 1-" + countStr + " to select without Enter",
+        " Либо цифрами 1-" + countStr + " выбор без подтверждения"
+    );
+
+    return Menu::inlineMenuSelect(pauseOptions, hint1, hint2);
 }
 
 bool DownloadScreen::onPlaylistDelay(int completedCount, int durationSeconds) {

@@ -1,6 +1,7 @@
 #include "Menu.hpp"
 #include "src/core/Console.hpp"
 #include "src/core/Keyboard.hpp"
+#include "src/services/LocalizationService.hpp"
 #include <iostream>
 
 namespace mrcli::ui {
@@ -42,7 +43,10 @@ int Menu::arrowSelect(const std::string& title,
         }
 
         core::Console::setColor(core::ConsoleColor::Yellow);
-        std::cout << "Arrows to select, Enter to confirm, ESC to return\n";
+        std::string instruction = s_loc ? s_loc->tr("Arrows to select, Enter to confirm, ESC to return\n",
+                                                    "Стрелки для выбора, Enter для подтверждения, ESC для возврата\n")
+                                        : "Arrows to select, Enter to confirm, ESC to return\n";
+        std::cout << instruction;
         core::Console::setColor(core::ConsoleColor::White);
 
         wint_t key = core::Keyboard::readWideChar();
@@ -72,14 +76,26 @@ int Menu::arrowSelect(const std::string& title,
     }
 }
 
-int Menu::inlineMenuSelect(const std::vector<std::string>& options) {
+int Menu::inlineMenuSelect(const std::vector<std::string>& options,
+                           const std::string& hint1,
+                           const std::string& hint2) {
     if (options.empty()) return 0;
+
+    std::string countStr = std::to_string(options.size());
+    std::string h1 = !hint1.empty() ? hint1 :
+        (s_loc ? s_loc->tr(" Arrows to select - Enter to confirm",
+                           " Стрелочки для выбор - ввод для подтверждения")
+               : " Arrows to select - Enter to confirm");
+    std::string h2 = !hint2.empty() ? hint2 :
+        (s_loc ? s_loc->tr(" Or numbers 1-" + countStr + " to select without Enter",
+                           " Либо цифрами 1-" + countStr + " выбор без подтверждения")
+               : " Or numbers 1-" + countStr + " to select without Enter");
 
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(hOut, &csbi);
 
-    int linesNeeded = static_cast<int>(options.size()) + 4;
+    int linesNeeded = static_cast<int>(options.size()) + 6;
     if (csbi.dwCursorPosition.Y + linesNeeded >= csbi.dwSize.Y) {
         for (int k = 0; k < linesNeeded; ++k) std::cout << "\n";
         GetConsoleScreenBufferInfo(hOut, &csbi);
@@ -103,7 +119,8 @@ int Menu::inlineMenuSelect(const std::vector<std::string>& options) {
         }
         core::Console::print("--------------------------------------------", core::ConsoleColor::Cyan);
         core::Console::setColor(core::ConsoleColor::Yellow);
-        std::cout << " Arrows to select, Enter or 1-" << options.size() << " to confirm         \n";
+        std::cout << h1 << "         \n";
+        std::cout << h2 << "         \n";
         core::Console::setColor(core::ConsoleColor::White);
 
         wint_t key = core::Keyboard::readWideChar();
