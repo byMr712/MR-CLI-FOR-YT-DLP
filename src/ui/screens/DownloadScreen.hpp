@@ -21,6 +21,7 @@ public:
     void onProgress(const domain::ProgressInfo& info) override;
     void onItemTransition(int current, int total) override;
     void onMediaItemStarted(int current, int total, const std::string& name, bool isAudio) override;
+    void onVideoArchived(int current, int total, const std::string& name) override;
     void onMergeStarted(const std::string& outputPath) override;
     void onMessage(const std::string& message, domain::LogLevel level) override;
     int onPauseRequested(bool isMultiVideo) override;
@@ -29,6 +30,7 @@ public:
 private:
     app::AppContext& m_ctx;
     bool m_progressActive = false;
+    bool m_hasOutputSinceLastTransition = false;
     int m_lastMediaItemIndex = 0;
     std::vector<std::string> m_skippedVideos;
 };

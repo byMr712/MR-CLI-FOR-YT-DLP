@@ -197,6 +197,27 @@ ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, 
 
     if (line.find("has already been recorded in the archive") != std::string_view::npos) {
         result.event = LineEvent::AlreadyInArchive;
+        size_t archPos = line.find("has already been recorded in the archive");
+        std::string raw = std::string(line.substr(0, archPos));
+        if (raw.rfind("[download] ", 0) == 0) {
+            raw = raw.substr(11);
+        }
+        raw = core::StringUtil::trim(raw);
+        while (!raw.empty() && (raw.back() == ':' || raw.back() == ' ')) {
+            raw.pop_back();
+        }
+        raw = core::StringUtil::trim(raw);
+
+        size_t colonPos = raw.find(": ");
+        if (colonPos != std::string::npos && colonPos + 2 < raw.size()) {
+            std::string afterColon = core::StringUtil::trim(raw.substr(colonPos + 2));
+            if (!afterColon.empty()) {
+                raw = afterColon;
+            }
+        }
+
+        result.mediaName = raw;
+        result.destinationPath = raw;
         return result;
     }
 

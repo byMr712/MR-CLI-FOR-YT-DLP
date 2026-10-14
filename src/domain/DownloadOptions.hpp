@@ -33,6 +33,7 @@ struct DownloadResult {
     int exitCode{0};
     int lastProcessedItem{0};
     int totalItems{0};
+    std::string savedDirectory;
 };
 
 } // namespace mrcli::domain

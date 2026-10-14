@@ -6,6 +6,7 @@
 #include "src/core/FileSystem.hpp"
 #include <conio.h>
 #include <iostream>
+#include <filesystem>
 
 namespace mrcli::services {
 
@@ -171,44 +172,69 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
     std::string line;
     char buffer[4096];
 
-    while (true) {
-        if (_kbhit()) {
+    auto checkAndHandleEscape = [&]() -> bool {
+        HWND fg = GetForegroundWindow();
+        HWND console = GetConsoleWindow();
+        bool consoleFocused = (fg == nullptr || fg == console);
+        bool escHit = false;
+
+        if (consoleFocused && (GetAsyncKeyState(VK_ESCAPE) & 0x8000)) {
+            escHit = true;
+        } else if (_kbhit()) {
             int key = _getch();
-            if (key == 27) { // ESC
-                process.suspend();
-                m_logger->warn(m_loc->get(StrId::StoppedByUser));
-
-                int action = observer ? observer->onPauseRequested(isPlaylist || totalItems > 1) : 0;
-
-                if (action == 0) {
-                    m_logger->success(m_loc->get(StrId::ResumingDownload));
-                    process.resume();
-                    continue;
-                }
-                else if (action == 1) {
-                    process.terminate(1);
-                    if (!currentVideoId.empty()) {
-                        m_archive->removeId(currentVideoId);
-                    }
-                    if (isPlaylist || totalItems > 1) {
-                        result.error = domain::ErrorType::SkipCurrentVideo;
-                        m_logger->warn(m_loc->get(StrId::CurrentVideoCancelled));
-                    } else {
-                        result.error = domain::ErrorType::CancelledByUser;
-                        m_logger->warn(m_loc->get(StrId::VideoCancelledByUser));
-                    }
-                    break;
-                }
-                else {
-                    process.terminate(1);
-                    if (!currentVideoId.empty()) {
-                        m_archive->removeId(currentVideoId);
-                    }
-                    result.error = domain::ErrorType::CancelledByUser;
-                    m_logger->warn(m_loc->get(StrId::AllVideosCancelledByUser));
-                    break;
-                }
+            if (key == 27) {
+                escHit = true;
             }
+        }
+
+        if (escHit) {
+            process.suspend();
+            m_logger->warn(m_loc->get(StrId::StoppedByUser));
+
+            // Flush buffered input so repeated ESC keypresses don't accidentally close the pause menu
+            FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+            while (_kbhit()) { (void)_getch(); }
+            while (GetAsyncKeyState(VK_ESCAPE) & 0x8000) { Sleep(10); }
+            FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+            while (_kbhit()) { (void)_getch(); }
+
+            int action = observer ? observer->onPauseRequested(isPlaylist || totalItems > 1) : 0;
+
+            if (action == 0) {
+                m_logger->success(m_loc->get(StrId::ResumingDownload));
+                process.resume();
+                return false;
+            }
+            else if (action == 1) {
+                process.terminate(1);
+                if (!currentVideoId.empty()) {
+                    m_archive->removeId(currentVideoId);
+                }
+                if (isPlaylist || totalItems > 1) {
+                    result.error = domain::ErrorType::SkipCurrentVideo;
+                    m_logger->warn(m_loc->get(StrId::CurrentVideoCancelled));
+                } else {
+                    result.error = domain::ErrorType::CancelledByUser;
+                    m_logger->warn(m_loc->get(StrId::VideoCancelledByUser));
+                }
+                return true;
+            }
+            else {
+                process.terminate(1);
+                if (!currentVideoId.empty()) {
+                    m_archive->removeId(currentVideoId);
+                }
+                result.error = domain::ErrorType::CancelledByUser;
+                m_logger->warn(m_loc->get(StrId::AllVideosCancelledByUser));
+                return true;
+            }
+        }
+        return false;
+    };
+
+    while (true) {
+        if (checkAndHandleEscape()) {
+            break;
         }
 
         size_t bytesRead = 0;
@@ -220,7 +246,10 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
             if (!process.isRunning()) {
                 break;
             }
-            Sleep(20);
+            if (checkAndHandleEscape()) {
+                break;
+            }
+            Sleep(15);
             continue;
         }
 
@@ -268,19 +297,60 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                     }
                     else if (parseRes.event == LineEvent::AlreadyInArchive) {
                         currentVideoCompleted = true;
+                        std::string archivedName = parseRes.mediaName;
+
+                        bool isJustId = archivedName.empty() || (archivedName.find(' ') == std::string::npos && archivedName.size() <= 20);
+                        if (isJustId) {
+                            std::string foundOnDisk = "";
+                            std::error_code ec;
+                            if (std::filesystem::exists(config.downloadPath, ec)) {
+                                char idxBuf3[16] = {0};
+                                char idxBuf2[16] = {0};
+                                if (curItem > 0) {
+                                    snprintf(idxBuf3, sizeof(idxBuf3), "%03d - ", curItem);
+                                    snprintf(idxBuf2, sizeof(idxBuf2), "%02d - ", curItem);
+                                }
+
+                                for (const auto& entry : std::filesystem::recursive_directory_iterator(config.downloadPath, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                                    if (entry.is_regular_file(ec)) {
+                                        std::string stem = entry.path().stem().u8string();
+                                        if ((idxBuf3[0] && stem.rfind(idxBuf3, 0) == 0) ||
+                                            (idxBuf2[0] && stem.rfind(idxBuf2, 0) == 0) ||
+                                            (!archivedName.empty() && stem.find(archivedName) != std::string::npos)) {
+                                            foundOnDisk = stem;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!foundOnDisk.empty()) {
+                                archivedName = foundOnDisk;
+                            } else if (curItem > 0) {
+                                char buf[16];
+                                snprintf(buf, sizeof(buf), "%03d", curItem);
+                                archivedName = buf;
+                            }
+                        }
+
                         if (observer) {
-                            observer->onMessage(m_loc->tr("[OK] Video already downloaded (in archive, skipping).",
-                                                          "[OK] Видео уже скачано (в архиве, пропуск)."),
-                                                domain::LogLevel::Info);
+                            observer->onVideoArchived(curItem, totalItems, archivedName);
                         }
                     }
                     else if (parseRes.event == LineEvent::Destination) {
+                        if (!parseRes.destinationPath.empty()) {
+                            std::string dir = core::FileSystem::getDirectoryName(parseRes.destinationPath);
+                            if (!dir.empty()) result.savedDirectory = dir;
+                        }
                         if (observer) {
                             observer->onMediaItemStarted(curItem, totalItems, parseRes.mediaName, parseRes.isAudio);
                         }
                     }
                     else if (parseRes.event == LineEvent::Merger) {
                         currentVideoCompleted = true;
+                        if (!parseRes.mediaName.empty()) {
+                            std::string dir = core::FileSystem::getDirectoryName(parseRes.mediaName);
+                            if (!dir.empty()) result.savedDirectory = dir;
+                        }
                         if (observer) {
                             observer->onMergeStarted(parseRes.mediaName);
                         }
@@ -292,6 +362,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         if (observer) {
                             observer->onProgress(parseRes.progress);
                         }
+                        if (checkAndHandleEscape()) break;
                     }
                     else if (parseRes.event == LineEvent::Warning || parseRes.event == LineEvent::Error) {
                         if (parseRes.error != domain::ErrorType::None) {
@@ -360,6 +431,19 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
         result.success = true;
     } else {
         result.success = false;
+    }
+
+    if (result.savedDirectory.empty()) {
+        result.savedDirectory = config.downloadPath;
+        if (options.isPlaylist) {
+            std::error_code ec;
+            for (const auto& entry : std::filesystem::directory_iterator(config.downloadPath, ec)) {
+                if (entry.is_directory(ec) && entry.path().filename().u8string().rfind("[Playlist] ", 0) == 0) {
+                    result.savedDirectory = entry.path().u8string();
+                    break;
+                }
+            }
+        }
     }
 
     return result;

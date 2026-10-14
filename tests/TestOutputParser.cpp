@@ -67,6 +67,18 @@ void testOutputParserMergerQuotes() {
     std::cout << "[PASS] testOutputParserMergerQuotes\n";
 }
 
+void testOutputParserAlreadyInArchive() {
+    using namespace mrcli::services;
+    using namespace mrcli::domain;
+
+    std::string line = "[download] 007 - Monetochka - Zaporozhets: has already been recorded in the archive";
+    auto result = OutputParser::parseLine(line, false, false);
+
+    assert(result.event == LineEvent::AlreadyInArchive);
+    assert(result.mediaName == "007 - Monetochka - Zaporozhets");
+    std::cout << "[PASS] testOutputParserAlreadyInArchive\n";
+}
+
 int main() {
     std::cout << "Running OutputParser tests...\n";
     testOutputParserProgress();
@@ -74,6 +86,7 @@ int main() {
     testOutputParserPoTokenError();
     testOutputParserDestinationCleanup();
     testOutputParserMergerQuotes();
+    testOutputParserAlreadyInArchive();
     std::cout << "All OutputParser tests passed successfully!\n";
     return 0;
 }

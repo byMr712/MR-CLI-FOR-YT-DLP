@@ -28,7 +28,10 @@ void DownloadScreen::onItemTransition(int current, int total) {
         std::cout << "\n";
         m_progressActive = false;
     }
-    std::cout << "\n";
+    if (m_hasOutputSinceLastTransition) {
+        std::cout << "\n";
+        m_hasOutputSinceLastTransition = false;
+    }
     m_lastMediaItemIndex = current;
 }
 
@@ -37,10 +40,11 @@ void DownloadScreen::onMediaItemStarted(int current, int total, const std::strin
         std::cout << "\n";
         m_progressActive = false;
     }
-    if (total > 0 && current > 1 && m_lastMediaItemIndex > 0 && current != m_lastMediaItemIndex) {
+    if (total > 0 && current > 1 && m_lastMediaItemIndex > 0 && current != m_lastMediaItemIndex && m_hasOutputSinceLastTransition) {
         std::cout << "\n";
     }
     m_lastMediaItemIndex = current;
+    m_hasOutputSinceLastTransition = true;
 
     std::string mediaType = isAudio ? m_ctx.loc->tr("Audio", "Аудио") : m_ctx.loc->tr("Video", "Видео");
     if (total > 0) {
@@ -51,11 +55,32 @@ void DownloadScreen::onMediaItemStarted(int current, int total, const std::strin
     }
 }
 
+void DownloadScreen::onVideoArchived(int current, int total, const std::string& name) {
+    if (m_progressActive) {
+        std::cout << "\n";
+        m_progressActive = false;
+    }
+    m_lastMediaItemIndex = current;
+    m_hasOutputSinceLastTransition = true;
+
+    std::string displayName = name;
+    if (displayName.empty() && current > 0) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%03d", current);
+        displayName = buf;
+    }
+
+    core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + displayName, core::ConsoleColor::Cyan);
+    core::Console::print(m_ctx.loc->tr("Skipped - already downloaded according to archive",
+                                       "Пропущено - по информации из архива уже скачано"), core::ConsoleColor::Yellow);
+}
+
 void DownloadScreen::onMergeStarted(const std::string& outputPath) {
     if (m_progressActive) {
         std::cout << "\n";
         m_progressActive = false;
     }
+    m_hasOutputSinceLastTransition = true;
     core::Console::print(m_ctx.loc->tr("[Merger] Merging video and audio into \"", "[Слияние] Объединение видео и аудио в \"") + outputPath + "\"", core::ConsoleColor::Cyan);
 }
 
@@ -64,6 +89,7 @@ void DownloadScreen::onMessage(const std::string& message, domain::LogLevel leve
         std::cout << "\n";
         m_progressActive = false;
     }
+    m_hasOutputSinceLastTransition = true;
     if (level == domain::LogLevel::Error) {
         m_ctx.logger->error(message);
     } else if (level == domain::LogLevel::Warning) {
@@ -408,7 +434,14 @@ void DownloadScreen::start(const std::string& url,
             try { if (currentIndex >= std::stoi(e)) isLast = true; } catch (...) {}
         }
         if (isLast) {
-            m_ctx.logger->info(m_ctx.loc->tr("[OK] Download finished!", "[OK] Скачивание завершено!"));
+            std::string targetDir = !result.savedDirectory.empty() ? result.savedDirectory : m_ctx.config.downloadPath;
+            while (!targetDir.empty() && (targetDir.back() == '\\' || targetDir.back() == '/')) {
+                targetDir.pop_back();
+            }
+            core::Console::print("============================================", core::ConsoleColor::Green);
+            core::Console::print(m_ctx.loc->tr("[OK] Videos processed and saved to:", "[OK] Видео обработаны и сохранены по пути:"), core::ConsoleColor::Green);
+            core::Console::print("\"" + targetDir + "\"", core::ConsoleColor::Green);
+            core::Console::print("============================================", core::ConsoleColor::Green);
             InputReader::waitForKey();
             return;
         }
@@ -440,8 +473,13 @@ void DownloadScreen::start(const std::string& url,
         return;
     }
 
+    std::string targetDir = !result.savedDirectory.empty() ? result.savedDirectory : m_ctx.config.downloadPath;
+    while (!targetDir.empty() && (targetDir.back() == '\\' || targetDir.back() == '/')) {
+        targetDir.pop_back();
+    }
     core::Console::print("============================================", core::ConsoleColor::Green);
-    core::Console::print(m_ctx.loc->tr("[OK] Download completed successfully!", "[OK] Скачивание успешно завершено!"), core::ConsoleColor::Green);
+    core::Console::print(m_ctx.loc->tr("[OK] Videos processed and saved to:", "[OK] Видео обработаны и сохранены по пути:"), core::ConsoleColor::Green);
+    core::Console::print("\"" + targetDir + "\"", core::ConsoleColor::Green);
     core::Console::print("============================================", core::ConsoleColor::Green);
     InputReader::waitForKey();
 }

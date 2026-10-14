@@ -103,6 +103,7 @@ int Menu::inlineMenuSelect(const std::vector<std::string>& options,
     }
     COORD startCoord = csbi.dwCursorPosition;
 
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
     int selected = 0;
     while (true) {
         SetConsoleCursorPosition(hOut, startCoord);
@@ -128,6 +129,8 @@ int Menu::inlineMenuSelect(const std::vector<std::string>& options,
             return selected;
         }
         if (key == 27) { // ESC = Resume
+            while (GetAsyncKeyState(VK_ESCAPE) & 0x8000) { Sleep(10); }
+            FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
             return 0;
         }
         if (key == 3) { // Ctrl+C = Cancel all
