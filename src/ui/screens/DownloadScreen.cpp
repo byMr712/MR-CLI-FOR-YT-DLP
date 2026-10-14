@@ -70,7 +70,12 @@ void DownloadScreen::onVideoArchived(int current, int total, const std::string& 
         displayName = buf;
     }
 
-    core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + displayName, core::ConsoleColor::Cyan);
+    if (total > 0 && current > 0) {
+        core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") +
+                             std::to_string(current) + m_ctx.loc->tr(" of ", " из ") + std::to_string(total) + " - " + displayName, core::ConsoleColor::Cyan);
+    } else {
+        core::Console::print(m_ctx.loc->tr("Downloading ", "Скачивание ") + displayName, core::ConsoleColor::Cyan);
+    }
     core::Console::print(m_ctx.loc->tr("Skipped - already downloaded according to archive",
                                        "Пропущено - по информации из архива уже скачано"), core::ConsoleColor::Yellow);
 }

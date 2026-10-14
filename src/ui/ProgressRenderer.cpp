@@ -78,6 +78,7 @@ bool ProgressRenderer::renderDelayCountdown(int completedCount, int durationSeco
     core::Console::print("----------------------------------------------------------------------", core::ConsoleColor::Cyan);
 
     bool cancelled = false;
+    bool skipped = false;
 
     for (int sec = durationSeconds; sec > 0; --sec) {
         core::Console::setColor(core::ConsoleColor::Cyan);
@@ -92,6 +93,7 @@ bool ProgressRenderer::renderDelayCountdown(int completedCount, int durationSeco
                 char c = core::Keyboard::normalizeKeyToEnglish(k);
                 if (k == 27 || k == 13 || k == ' ') {
                     skip = true;
+                    skipped = true;
                     break;
                 } else if (c == 'q' || c == 'Q' || k == 3) {
                     cancelled = true;
@@ -117,7 +119,13 @@ bool ProgressRenderer::renderDelayCountdown(int completedCount, int durationSeco
         }
     }
 
-    std::cout << "\n";
+    if (!cancelled) {
+        if (!skipped) {
+            std::cout << "\n\n";
+        } else {
+            std::cout << "\n";
+        }
+    }
     return !cancelled;
 }
 

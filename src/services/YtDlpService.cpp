@@ -163,7 +163,8 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
     bool isPlaylist = options.isPlaylist;
     bool mergeFailed = false;
     int curItem = 0, totalItems = 0;
-    int playlistItemsProcessed = 0;
+    int completedVideosCount = 0;
+    int lastDelayAtCount = 0;
     std::string currentVideoId = "";
     bool currentVideoCompleted = false;
     std::string mergeErrorPath = "";
@@ -272,10 +273,10 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                             if (observer) {
                                 observer->onItemTransition(parseRes.curItem, parseRes.totalItems);
                             }
-                            playlistItemsProcessed++;
                             if (config.playlistDelayEnabled && config.playlistDelayInterval > 0 && config.playlistDelayDuration > 0) {
-                                if (playlistItemsProcessed % config.playlistDelayInterval == 0) {
-                                    if (observer && !observer->onPlaylistDelay(playlistItemsProcessed, config.playlistDelayDuration)) {
+                                if (completedVideosCount > 0 && completedVideosCount % config.playlistDelayInterval == 0 && completedVideosCount != lastDelayAtCount) {
+                                    lastDelayAtCount = completedVideosCount;
+                                    if (observer && !observer->onPlaylistDelay(completedVideosCount, config.playlistDelayDuration)) {
                                         result.error = domain::ErrorType::CancelledByUser;
                                         if (!currentVideoId.empty()) {
                                             m_archive->removeId(currentVideoId);
@@ -296,7 +297,10 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         isPlaylist = (totalItems > 0);
                     }
                     else if (parseRes.event == LineEvent::AlreadyInArchive) {
-                        currentVideoCompleted = true;
+                        if (!currentVideoCompleted) {
+                            currentVideoCompleted = true;
+                            completedVideosCount++;
+                        }
                         std::string archivedName = parseRes.mediaName;
 
                         bool isJustId = archivedName.empty() || (archivedName.find(' ') == std::string::npos && archivedName.size() <= 20);
@@ -346,7 +350,10 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         }
                     }
                     else if (parseRes.event == LineEvent::Merger) {
-                        currentVideoCompleted = true;
+                        if (!currentVideoCompleted) {
+                            currentVideoCompleted = true;
+                            completedVideosCount++;
+                        }
                         if (!parseRes.mediaName.empty()) {
                             std::string dir = core::FileSystem::getDirectoryName(parseRes.mediaName);
                             if (!dir.empty()) result.savedDirectory = dir;
@@ -357,7 +364,10 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                     }
                     else if (parseRes.event == LineEvent::Progress) {
                         if (parseRes.progress.percent >= 99.9 && (config.onlyAudio || config.onlyVideo)) {
-                            currentVideoCompleted = true;
+                            if (!currentVideoCompleted) {
+                                currentVideoCompleted = true;
+                                completedVideosCount++;
+                            }
                         }
                         if (observer) {
                             observer->onProgress(parseRes.progress);

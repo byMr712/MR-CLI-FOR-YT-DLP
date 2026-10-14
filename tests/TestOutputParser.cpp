@@ -79,6 +79,19 @@ void testOutputParserAlreadyInArchive() {
     std::cout << "[PASS] testOutputParserAlreadyInArchive\n";
 }
 
+void testOutputParserAlreadyDownloaded() {
+    using namespace mrcli::services;
+    using namespace mrcli::domain;
+
+    std::string line = "[download] C:\\Users\\Mr712\\Documents\\MR-CLI-FOR-YT-DLP\\downloads\\[Playlist] monetochka\\003 - [Monetochka] Nimfomanka.mp4 has already been downloaded";
+    auto result = OutputParser::parseLine(line, false, false);
+
+    assert(result.event == LineEvent::AlreadyInArchive);
+    assert(result.mediaName == "003 - [Monetochka] Nimfomanka");
+    assert(result.destinationPath == "C:\\Users\\Mr712\\Documents\\MR-CLI-FOR-YT-DLP\\downloads\\[Playlist] monetochka\\003 - [Monetochka] Nimfomanka.mp4");
+    std::cout << "[PASS] testOutputParserAlreadyDownloaded\n";
+}
+
 int main() {
     std::cout << "Running OutputParser tests...\n";
     testOutputParserProgress();
@@ -87,6 +100,7 @@ int main() {
     testOutputParserDestinationCleanup();
     testOutputParserMergerQuotes();
     testOutputParserAlreadyInArchive();
+    testOutputParserAlreadyDownloaded();
     std::cout << "All OutputParser tests passed successfully!\n";
     return 0;
 }

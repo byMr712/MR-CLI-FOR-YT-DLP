@@ -195,8 +195,43 @@ ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, 
         }
     }
 
-    if (line.find("has already been recorded in the archive") != std::string_view::npos) {
+    if (line.find("has already been recorded in the archive") != std::string_view::npos ||
+        line.find("has already been downloaded") != std::string_view::npos) {
         result.event = LineEvent::AlreadyInArchive;
+
+        if (line.find("has already been downloaded") != std::string_view::npos) {
+            size_t downPos = line.find("has already been downloaded");
+            std::string path = std::string(line.substr(0, downPos));
+            if (path.rfind("[download] ", 0) == 0) {
+                path = path.substr(11);
+            }
+            path = core::StringUtil::trim(path);
+            while (!path.empty() && (path.front() == '"' || path.front() == '\'')) path.erase(path.begin());
+            while (!path.empty() && (path.back() == '"' || path.back() == '\'')) path.pop_back();
+            result.destinationPath = path;
+
+            size_t slash = path.find_last_of("\\/");
+            std::string name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+            size_t dot = name.find_last_of('.');
+            if (dot != std::string::npos) {
+                name = name.substr(0, dot);
+            }
+
+            size_t fDot = name.find_last_of('.');
+            if (fDot != std::string::npos && fDot + 1 < name.size() && (name[fDot + 1] == 'f' || name[fDot + 1] == 'F')) {
+                bool allDigits = true;
+                for (size_t k = fDot + 2; k < name.size(); ++k) {
+                    if (!isdigit(static_cast<unsigned char>(name[k]))) { allDigits = false; break; }
+                }
+                if (allDigits && fDot + 2 <= name.size()) {
+                    name = name.substr(0, fDot);
+                }
+            }
+
+            result.mediaName = name;
+            return result;
+        }
+
         size_t archPos = line.find("has already been recorded in the archive");
         std::string raw = std::string(line.substr(0, archPos));
         if (raw.rfind("[download] ", 0) == 0) {
@@ -214,6 +249,16 @@ ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, 
             if (!afterColon.empty()) {
                 raw = afterColon;
             }
+        }
+
+        size_t slash = raw.find_last_of("\\/");
+        if (slash != std::string::npos) {
+            std::string name = raw.substr(slash + 1);
+            size_t dot = name.find_last_of('.');
+            if (dot != std::string::npos) {
+                name = name.substr(0, dot);
+            }
+            raw = name;
         }
 
         result.mediaName = raw;
