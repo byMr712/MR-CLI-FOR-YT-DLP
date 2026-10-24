@@ -235,6 +235,7 @@ void SettingsScreen::clearArchiveMenu() {
     if (sel == 0) {
         m_ctx.archiveService->clear();
         m_ctx.logger->info(loc.tr("[OK] Download archive cleared!", "[OK] Архив загрузок очищен!"));
+        core::Console::print(loc.tr("Press any key to continue...", "Нажмите любую клавишу для продолжения..."), core::ConsoleColor::Yellow);
         InputReader::waitForKey();
     }
 }
@@ -250,18 +251,46 @@ void SettingsScreen::updateComponentsMenu() {
     };
     int sel = Menu::arrowSelect(loc.tr("UPDATE COMPONENTS", "ОБНОВЛЕНИЕ КОМПОНЕНТОВ"), "", opts, 0);
     if (sel == 0) {
-        m_ctx.dependencyManager->installYtDlp();
-        m_ctx.dependencyManager->installFFmpeg();
-        m_ctx.dependencyManager->installQuickJs();
+        bool ok1 = m_ctx.dependencyManager->installYtDlp();
+        bool ok2 = m_ctx.dependencyManager->installFFmpeg();
+        bool ok3 = m_ctx.dependencyManager->installQuickJs();
+        std::cout << "\n";
+        if (ok1 && ok2 && ok3) {
+            core::Console::print(loc.tr("[OK] All components updated successfully!", "[OK] Все компоненты успешно обновлены!"), core::ConsoleColor::Green);
+        } else {
+            core::Console::print(loc.tr("[!] Some components could not be updated.", "[!] Некоторые компоненты не удалось обновить."), core::ConsoleColor::Yellow);
+        }
+        core::Console::print(loc.tr("Press any key to continue...", "Нажмите любую клавишу для продолжения..."), core::ConsoleColor::Yellow);
         InputReader::waitForKey();
     } else if (sel == 1) {
-        m_ctx.dependencyManager->installYtDlp();
+        bool ok = m_ctx.dependencyManager->installYtDlp();
+        std::cout << "\n";
+        if (ok) {
+            core::Console::print(loc.tr("[OK] yt-dlp updated successfully!", "[OK] yt-dlp успешно обновлен!"), core::ConsoleColor::Green);
+        } else {
+            core::Console::print(loc.tr("[ERROR] Failed to update yt-dlp.", "[ОШИБКА] Не удалось обновить yt-dlp."), core::ConsoleColor::Red);
+        }
+        core::Console::print(loc.tr("Press any key to continue...", "Нажмите любую клавишу для продолжения..."), core::ConsoleColor::Yellow);
         InputReader::waitForKey();
     } else if (sel == 2) {
-        m_ctx.dependencyManager->installFFmpeg();
+        bool ok = m_ctx.dependencyManager->installFFmpeg();
+        std::cout << "\n";
+        if (ok) {
+            core::Console::print(loc.tr("[OK] FFmpeg updated successfully!", "[OK] FFmpeg успешно обновлен!"), core::ConsoleColor::Green);
+        } else {
+            core::Console::print(loc.tr("[ERROR] Failed to update FFmpeg.", "[ОШИБКА] Не удалось обновить FFmpeg."), core::ConsoleColor::Red);
+        }
+        core::Console::print(loc.tr("Press any key to continue...", "Нажмите любую клавишу для продолжения..."), core::ConsoleColor::Yellow);
         InputReader::waitForKey();
     } else if (sel == 3) {
-        m_ctx.dependencyManager->installQuickJs();
+        bool ok = m_ctx.dependencyManager->installQuickJs();
+        std::cout << "\n";
+        if (ok) {
+            core::Console::print(loc.tr("[OK] QuickJS updated successfully!", "[OK] QuickJS успешно обновлен!"), core::ConsoleColor::Green);
+        } else {
+            core::Console::print(loc.tr("[ERROR] Failed to update QuickJS.", "[ОШИБКА] Не удалось обновить QuickJS."), core::ConsoleColor::Red);
+        }
+        core::Console::print(loc.tr("Press any key to continue...", "Нажмите любую клавишу для продолжения..."), core::ConsoleColor::Yellow);
         InputReader::waitForKey();
     }
 }
