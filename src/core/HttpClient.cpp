@@ -9,7 +9,7 @@ namespace mrcli::core {
 
 bool HttpClient::downloadFile(
     std::string_view url,
-    const std::filesystem::path& destinationPath,
+    const PathArg& destinationPath,
     ProgressCallback onProgress
 ) {
     std::wstring wurl = StringUtil::utf8ToWstring(url);
@@ -65,7 +65,7 @@ bool HttpClient::downloadFile(
         }
     }
 
-    std::ofstream outFile(destinationPath, std::ios::binary);
+    std::ofstream outFile(destinationPath.path(), std::ios::binary);
     if (!outFile.is_open()) return false;
 
     std::vector<char> buffer(64 * 1024);

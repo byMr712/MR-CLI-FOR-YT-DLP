@@ -6,6 +6,48 @@
 
 namespace mrcli::ui {
 
+static bool isBackOption(std::string_view opt, bool isLastItem) noexcept {
+    if (!isLastItem) return false;
+    return (opt.find("Назад") != std::string_view::npos ||
+            opt.find("Back") != std::string_view::npos ||
+            opt.find("Вернуться") != std::string_view::npos ||
+            opt.find("Return") != std::string_view::npos);
+}
+
+static char getOptionHotkey(std::string_view opt, int index, size_t totalOptions) noexcept {
+    bool isLast = (index == static_cast<int>(totalOptions) - 1);
+    if (isBackOption(opt, isLast)) {
+        return '0';
+    }
+    if (opt.size() >= 3 && opt[1] == '.' && opt[2] == ' ') {
+        char c = opt[0];
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + 32);
+        return c;
+    }
+    if (index < 9) {
+        return static_cast<char>('1' + index);
+    }
+    return static_cast<char>('a' + (index - 9));
+}
+
+static std::string formatOptionLine(std::string_view opt, int index, size_t totalOptions) {
+    bool isLast = (index == static_cast<int>(totalOptions) - 1);
+    if (isBackOption(opt, isLast)) {
+        if (opt.size() >= 3 && opt[0] == '0' && opt[1] == '.' && opt[2] == ' ') {
+            return std::string(opt);
+        }
+        return "0. " + std::string(opt);
+    }
+    if (opt.size() >= 3 && opt[1] == '.' && opt[2] == ' ') {
+        return std::string(opt);
+    }
+    if (index < 9) {
+        return std::to_string(index + 1) + ". " + std::string(opt);
+    }
+    char letter = static_cast<char>('a' + (index - 9));
+    return std::string(1, letter) + ". " + std::string(opt);
+}
+
 int Menu::arrowSelect(const std::string& title,
                       const std::string& description,
                       const std::vector<std::string>& options,
@@ -15,8 +57,12 @@ int Menu::arrowSelect(const std::string& title,
 
     int selected = (defaultSelection >= 0 && defaultSelection < static_cast<int>(options.size())) ? defaultSelection : 0;
 
+    core::Console::clear();
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD home = { 0, 0 };
+
     while (true) {
-        core::Console::clear();
+        SetConsoleCursorPosition(hOut, home);
         core::Console::print("========================================", core::ConsoleColor::Cyan);
         core::Console::print(" " + title, core::ConsoleColor::Cyan);
         core::Console::print("========================================", core::ConsoleColor::Cyan);
@@ -27,27 +73,29 @@ int Menu::arrowSelect(const std::string& title,
 
         std::cout << "----------------------------------------\n";
         for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+            std::string lineText = formatOptionLine(options[i], i, options.size());
+
             if (i == selected) {
                 core::Console::setColor(core::ConsoleColor::Green);
-                std::cout << " > " << (i + 1) << ". " << options[i] << "\n";
+                std::cout << " > " << lineText << "\033[K\n";
                 core::Console::setColor(core::ConsoleColor::White);
             } else {
-                std::cout << "   " << (i + 1) << ". " << options[i] << "\n";
+                std::cout << "   " << lineText << "\033[K\n";
             }
         }
         std::cout << "----------------------------------------\n";
 
-        if (selected >= 0 && selected < static_cast<int>(hints.size()) && !hints[selected].empty()) {
-            core::Console::print("[?] " + hints[selected], core::ConsoleColor::DarkGray);
+        if (!hints.empty()) {
+            std::string hintStr = (selected >= 0 && selected < static_cast<int>(hints.size()) && !hints[selected].empty())
+                ? ("[?] " + hints[selected]) : "";
+            core::Console::print(hintStr + "\033[K", core::ConsoleColor::DarkGray);
             std::cout << "\n";
         }
 
-        core::Console::setColor(core::ConsoleColor::Yellow);
-        std::string instruction = s_loc ? s_loc->tr("Arrows to select, Enter to confirm, ESC to return\n",
-                                                    "Стрелки для выбора, Enter для подтверждения, ESC для возврата\n")
-                                        : "Arrows to select, Enter to confirm, ESC to return\n";
-        std::cout << instruction;
-        core::Console::setColor(core::ConsoleColor::White);
+        std::string instruction = s_loc ? s_loc->tr("Arrows to select, Enter to confirm, ESC to return",
+                                                    "Стрелки для выбора, Enter для подтверждения, ESC для возврата")
+                                        : "Arrows to select, Enter to confirm, ESC to return";
+        core::Console::print(instruction + "\033[K", core::ConsoleColor::Yellow);
 
         wint_t key = core::Keyboard::readWideChar();
         if (key == 27) { // ESC
@@ -66,11 +114,10 @@ int Menu::arrowSelect(const std::string& title,
             }
         } else {
             char ch = core::Keyboard::normalizeKeyToEnglish(key);
-            if (ch >= '1' && ch < '1' + static_cast<int>(options.size())) {
-                return (ch - '1');
-            }
-            if (ch == '0') {
-                return -1;
+            for (int i = 0; i < static_cast<int>(options.size()); ++i) {
+                if (getOptionHotkey(options[i], i, options.size()) == ch) {
+                    return i;
+                }
             }
         }
     }
@@ -78,24 +125,23 @@ int Menu::arrowSelect(const std::string& title,
 
 int Menu::inlineMenuSelect(const std::vector<std::string>& options,
                            const std::string& hint1,
-                           const std::string& hint2) {
+                           const std::string& hint2,
+                           int escReturnValue,
+                           bool clearOnExit) {
     if (options.empty()) return 0;
 
     std::string countStr = std::to_string(options.size());
     std::string h1 = !hint1.empty() ? hint1 :
-        (s_loc ? s_loc->tr(" Arrows to select - Enter to confirm",
-                           " Стрелочки для выбор - ввод для подтверждения")
-               : " Arrows to select - Enter to confirm");
-    std::string h2 = !hint2.empty() ? hint2 :
-        (s_loc ? s_loc->tr(" Or numbers 1-" + countStr + " to select without Enter",
-                           " Либо цифрами 1-" + countStr + " выбор без подтверждения")
-               : " Or numbers 1-" + countStr + " to select without Enter");
+        (s_loc ? s_loc->tr(" Arrows to select, Enter to confirm, ESC to return",
+                           " Стрелки для выбора, Enter для подтверждения, ESC для возврата")
+               : " Arrows to select, Enter to confirm, ESC to return");
+    std::string h2 = hint2;
 
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(hOut, &csbi);
 
-    int linesNeeded = static_cast<int>(options.size()) + 6;
+    int linesNeeded = static_cast<int>(options.size()) + (h2.empty() ? 5 : 6);
     if (csbi.dwCursorPosition.Y + linesNeeded >= csbi.dwSize.Y) {
         for (int k = 0; k < linesNeeded; ++k) std::cout << "\n";
         GetConsoleScreenBufferInfo(hOut, &csbi);
@@ -112,26 +158,44 @@ int Menu::inlineMenuSelect(const std::vector<std::string>& options,
         for (int i = 0; i < static_cast<int>(options.size()); ++i) {
             if (i == selected) {
                 core::Console::setColor(core::ConsoleColor::Green);
-                std::cout << " > " << (i + 1) << ". " << options[i] << "                     \n";
+                std::cout << " > " << (i + 1) << ". " << options[i] << "\033[K\n";
                 core::Console::setColor(core::ConsoleColor::White);
             } else {
-                std::cout << "   " << (i + 1) << ". " << options[i] << "                     \n";
+                std::cout << "   " << (i + 1) << ". " << options[i] << "\033[K\n";
             }
         }
         core::Console::print("--------------------------------------------", core::ConsoleColor::Cyan);
         core::Console::setColor(core::ConsoleColor::Yellow);
-        std::cout << h1 << "         \n";
-        std::cout << h2 << "         \n";
+        std::cout << h1 << "\033[K\n";
+        if (!h2.empty()) {
+            std::cout << h2 << "\033[K\n";
+        }
         core::Console::setColor(core::ConsoleColor::White);
 
         wint_t key = core::Keyboard::readWideChar();
         if (key == 13) {
+            if (clearOnExit) {
+                SetConsoleCursorPosition(hOut, startCoord);
+                std::string emptyLine(80, ' ');
+                for (int k = 0; k < linesNeeded; ++k) {
+                    std::cout << emptyLine << "\n";
+                }
+                SetConsoleCursorPosition(hOut, startCoord);
+            }
             return selected;
         }
-        if (key == 27) { // ESC = Resume
+        if (key == 27) { // ESC
             while (GetAsyncKeyState(VK_ESCAPE) & 0x8000) { Sleep(10); }
             FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
-            return 0;
+            if (clearOnExit) {
+                SetConsoleCursorPosition(hOut, startCoord);
+                std::string emptyLine(80, ' ');
+                for (int k = 0; k < linesNeeded; ++k) {
+                    std::cout << emptyLine << "\n";
+                }
+                SetConsoleCursorPosition(hOut, startCoord);
+            }
+            return escReturnValue;
         }
         if (key == 3) { // Ctrl+C = Cancel all
             return (options.size() > 2) ? 2 : 1;
@@ -147,6 +211,14 @@ int Menu::inlineMenuSelect(const std::vector<std::string>& options,
         } else {
             char ch = core::Keyboard::normalizeKeyToEnglish(key);
             if (ch >= '1' && ch < '1' + static_cast<int>(options.size())) {
+                if (clearOnExit) {
+                    SetConsoleCursorPosition(hOut, startCoord);
+                    std::string emptyLine(80, ' ');
+                    for (int k = 0; k < linesNeeded; ++k) {
+                        std::cout << emptyLine << "\n";
+                    }
+                    SetConsoleCursorPosition(hOut, startCoord);
+                }
                 return (ch - '1');
             }
             if (ch == 'q' || ch == 'Q') {

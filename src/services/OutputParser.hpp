@@ -17,6 +17,9 @@ enum class LineEvent {
     MergeStarted,
     MergeFinished,
     MergeFailed,
+    PrepExtracting,
+    PrepPlayer,
+    PrepFormats,
     Warning,
     Error,
     ErrorDetected

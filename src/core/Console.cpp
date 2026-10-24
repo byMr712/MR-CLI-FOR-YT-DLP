@@ -18,6 +18,7 @@ void Console::init() noexcept {
 }
 
 void Console::setColor(ConsoleColor color) noexcept {
+    std::cout << std::flush;
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE) {
         SetConsoleTextAttribute(hOut, static_cast<WORD>(color));

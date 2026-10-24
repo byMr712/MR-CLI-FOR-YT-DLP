@@ -165,10 +165,15 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
     int curItem = 0, totalItems = 0;
     int completedVideosCount = 0;
     int lastDelayAtCount = 0;
+    int lastPrepStep = 1;
     std::string currentVideoId = "";
     bool currentVideoCompleted = false;
     std::string mergeErrorPath = "";
     bool sawPotWarning = false;
+
+    if (observer) {
+        observer->onPreparationStep(1);
+    }
 
     std::string line;
     char buffer[4096];
@@ -297,6 +302,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         isPlaylist = (totalItems > 0);
                     }
                     else if (parseRes.event == LineEvent::AlreadyInArchive) {
+                        lastPrepStep = 999;
                         if (!currentVideoCompleted) {
                             currentVideoCompleted = true;
                             completedVideosCount++;
@@ -307,7 +313,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         if (isJustId) {
                             std::string foundOnDisk = "";
                             std::error_code ec;
-                            if (std::filesystem::exists(config.downloadPath, ec)) {
+                            if (core::FileSystem::dirExists(config.downloadPath)) {
                                 char idxBuf3[16] = {0};
                                 char idxBuf2[16] = {0};
                                 if (curItem > 0) {
@@ -315,7 +321,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                                     snprintf(idxBuf2, sizeof(idxBuf2), "%02d - ", curItem);
                                 }
 
-                                for (const auto& entry : std::filesystem::recursive_directory_iterator(config.downloadPath, std::filesystem::directory_options::skip_permission_denied, ec)) {
+                                for (const auto& entry : std::filesystem::recursive_directory_iterator(std::filesystem::u8path(config.downloadPath), std::filesystem::directory_options::skip_permission_denied, ec)) {
                                     if (entry.is_regular_file(ec)) {
                                         std::string stem = entry.path().stem().u8string();
                                         if ((idxBuf3[0] && stem.rfind(idxBuf3, 0) == 0) ||
@@ -341,6 +347,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                         }
                     }
                     else if (parseRes.event == LineEvent::Destination) {
+                        lastPrepStep = 999;
                         if (!parseRes.destinationPath.empty()) {
                             std::string dir = core::FileSystem::getDirectoryName(parseRes.destinationPath);
                             if (!dir.empty()) result.savedDirectory = dir;
@@ -395,6 +402,24 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
                             observer->onMessage(line, parseRes.event == LineEvent::Error ? domain::LogLevel::Error : domain::LogLevel::Warning);
                         }
                     }
+                    else if (parseRes.event == LineEvent::PrepExtracting) {
+                        if (lastPrepStep < 2) {
+                            lastPrepStep = 2;
+                            if (observer) observer->onPreparationStep(2);
+                        }
+                    }
+                    else if (parseRes.event == LineEvent::PrepPlayer) {
+                        if (lastPrepStep < 3) {
+                            lastPrepStep = 3;
+                            if (observer) observer->onPreparationStep(3);
+                        }
+                    }
+                    else if (parseRes.event == LineEvent::PrepFormats) {
+                        if (lastPrepStep < 4) {
+                            lastPrepStep = 4;
+                            if (observer) observer->onPreparationStep(4);
+                        }
+                    }
 
                     line.clear();
                 }
@@ -447,7 +472,7 @@ domain::DownloadResult YtDlpService::execute(const domain::AppConfig& config,
         result.savedDirectory = config.downloadPath;
         if (options.isPlaylist) {
             std::error_code ec;
-            for (const auto& entry : std::filesystem::directory_iterator(config.downloadPath, ec)) {
+            for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::u8path(config.downloadPath), ec)) {
                 if (entry.is_directory(ec) && entry.path().filename().u8string().rfind("[Playlist] ", 0) == 0) {
                     result.savedDirectory = entry.path().u8string();
                     break;

@@ -25,10 +25,14 @@ char MainMenuScreen::renderMenu() {
     std::vector<int> actions = { -1, '1', -1, 's', 'l', '0' };
 
     int selected = 1;
+    core::Console::clear();
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    COORD home = { 0, 0 };
+
     while (true) {
-        core::Console::clear();
+        SetConsoleCursorPosition(hOut, home);
         core::Console::print("========================================", core::ConsoleColor::Cyan);
-        core::Console::print(loc.tr(" MR CLI FOR YT-DLP v1.1.4", " MR CLI ДЛЯ YT-DLP v1.1.4"), core::ConsoleColor::Cyan);
+        core::Console::print(loc.tr(" MR CLI FOR YT-DLP v1.1.5", " MR CLI ДЛЯ YT-DLP v1.1.5"), core::ConsoleColor::Cyan);
         core::Console::print("========================================", core::ConsoleColor::Cyan);
         core::Console::print("========================================", core::ConsoleColor::Green);
         core::Console::print(" YT-DLP:  " + std::string(deps.ytDlpInstalled ? loc.tr("[OK] installed", "[OK] установлен") : loc.tr("[ERROR] not found", "[ОШИБКА] не найден")),
@@ -51,9 +55,10 @@ char MainMenuScreen::renderMenu() {
                 std::cout << "   " << opts[i] << "\n";
             }
         }
-        std::cout << "========================================\n";
-        std::cout << "\n" << loc.tr("Arrow keys to select, Enter to confirm, ESC or 0 to exit\n",
-                                    "Стрелки для выбора, Enter для подтверждения, ESC или 0 для выхода\n");
+        std::cout << "========================================\n\n";
+        core::Console::print(loc.tr("Arrows to select, Enter to confirm, ESC to return",
+                                    "Стрелки для выбора, Enter для подтверждения, ESC для возврата"),
+                             core::ConsoleColor::Yellow);
 
         wint_t key = core::Keyboard::readWideChar();
         if (key == 27 || key == '0') return '0';

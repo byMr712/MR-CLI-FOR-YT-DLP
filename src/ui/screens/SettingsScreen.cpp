@@ -28,18 +28,12 @@ void SettingsScreen::show() {
             loc.tr("Playlist delay: [", "Задержка плейлистов: [") + (m_ctx.config.playlistDelayEnabled ? loc.tr("ON", "ВКЛ") : loc.tr("OFF", "ВЫКЛ")) + "] " +
                 loc.tr("every ", "каждые ") + std::to_string(m_ctx.config.playlistDelayInterval) + loc.tr(" vids / ", " вид. / ") + std::to_string(m_ctx.config.playlistDelayDuration) + loc.tr("s", "с"),
             loc.tr("Clear Download Archive", "Очистить историю загрузок"),
-            loc.tr("Cookie Editor", "Редактор куки"),
-            loc.tr("Update components", "Обновить компоненты"),
+            "c. " + loc.tr("Cookie Editor", "Редактор куки"),
+            "u. " + loc.tr("Update components", "Обновить компоненты"),
             loc.tr("Return to Main Menu (ESC)", "Вернуться в главное меню (ESC)")
         };
 
         std::vector<char> actions = { '1', '2', '3', '4', '5', '6', '7', '8', '9', 'c', 'u', '0' };
-
-        core::Console::clear();
-        core::Console::print("========================================", core::ConsoleColor::Cyan);
-        core::Console::print(" " + loc.tr("SETTINGS", "НАСТРОЙКИ"), core::ConsoleColor::Cyan);
-        core::Console::print("========================================", core::ConsoleColor::Cyan);
-        std::cout << "========================================\n";
 
         int selected = 0;
         int actionIndex = Menu::arrowSelect(loc.tr("SETTINGS", "НАСТРОЙКИ"), "", opts, selected);
@@ -248,6 +242,7 @@ void SettingsScreen::clearArchiveMenu() {
 void SettingsScreen::updateComponentsMenu() {
     auto& loc = *m_ctx.loc;
     std::vector<std::string> opts = {
+        loc.tr("Update all", "Обновить всё"),
         loc.tr("Update yt-dlp", "Обновить yt-dlp"),
         loc.tr("Update FFmpeg", "Обновить FFmpeg"),
         loc.tr("Update QuickJS", "Обновить QuickJS"),
@@ -256,11 +251,16 @@ void SettingsScreen::updateComponentsMenu() {
     int sel = Menu::arrowSelect(loc.tr("UPDATE COMPONENTS", "ОБНОВЛЕНИЕ КОМПОНЕНТОВ"), "", opts, 0);
     if (sel == 0) {
         m_ctx.dependencyManager->installYtDlp();
+        m_ctx.dependencyManager->installFFmpeg();
+        m_ctx.dependencyManager->installQuickJs();
         InputReader::waitForKey();
     } else if (sel == 1) {
-        m_ctx.dependencyManager->installFFmpeg();
+        m_ctx.dependencyManager->installYtDlp();
         InputReader::waitForKey();
     } else if (sel == 2) {
+        m_ctx.dependencyManager->installFFmpeg();
+        InputReader::waitForKey();
+    } else if (sel == 3) {
         m_ctx.dependencyManager->installQuickJs();
         InputReader::waitForKey();
     }

@@ -4,6 +4,7 @@
 namespace mrcli::core {
 
 char Keyboard::normalizeKeyToEnglish(wint_t wc) noexcept {
+    if (wc >= L'A' && wc <= L'Z') return static_cast<char>(wc + 32);
     if (wc < 128) return static_cast<char>(wc);
     switch (wc) {
         case 0x0439: case 0x0419: return 'q';

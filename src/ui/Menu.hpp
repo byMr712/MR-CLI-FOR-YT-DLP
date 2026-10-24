@@ -21,7 +21,9 @@ public:
 
     static int inlineMenuSelect(const std::vector<std::string>& options,
                                 const std::string& hint1 = "",
-                                const std::string& hint2 = "");
+                                const std::string& hint2 = "",
+                                int escReturnValue = 0,
+                                bool clearOnExit = false);
 
 private:
     inline static const services::LocalizationService* s_loc = nullptr;

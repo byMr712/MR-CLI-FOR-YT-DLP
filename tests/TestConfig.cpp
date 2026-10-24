@@ -44,9 +44,21 @@ void testConfigSaveLoad() {
     std::cout << "[PASS] testConfigSaveLoad\n";
 }
 
+void testFileSystemCyrillicPath() {
+    std::string fullPath = "X:\\!Фильмы, мультсериалы и тд\\Клипы и тд\\SeanWay Studio\\JAWNY - Honeypie.mp4";
+    std::string dir = mrcli::core::FileSystem::getDirectoryName(fullPath);
+    std::string expectedDir = "X:\\!Фильмы, мультсериалы и тд\\Клипы и тд\\SeanWay Studio";
+    assert(dir == expectedDir);
+
+    std::string fileName = mrcli::core::FileSystem::getFileName(fullPath);
+    assert(fileName == "JAWNY - Honeypie.mp4");
+    std::cout << "[PASS] testFileSystemCyrillicPath\n";
+}
+
 int main() {
     std::cout << "Running Config tests...\n";
     testConfigSaveLoad();
+    testFileSystemCyrillicPath();
     std::cout << "All Config tests passed successfully!\n";
     return 0;
 }

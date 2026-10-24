@@ -6,8 +6,8 @@
 namespace mrcli::core {
 
 bool ZipExtractor::extract(
-    const std::filesystem::path& zipFilePath,
-    const std::filesystem::path& destinationDirectory
+    const PathArg& zipFilePath,
+    const PathArg& destinationDirectory
 ) {
     if (!FileSystem::fileExists(zipFilePath)) {
         return false;
@@ -27,8 +27,8 @@ bool ZipExtractor::extract(
         return false;
     }
 
-    std::wstring wzip = zipFilePath.wstring();
-    std::wstring wdest = destinationDirectory.wstring();
+    std::wstring wzip = zipFilePath.path().wstring();
+    std::wstring wdest = destinationDirectory.path().wstring();
 
     VARIANT vZip;
     VariantInit(&vZip);

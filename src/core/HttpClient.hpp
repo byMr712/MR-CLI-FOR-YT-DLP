@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <functional>
 #include <cstdint>
+#include "FileSystem.hpp"
 
 namespace mrcli::core {
 
@@ -13,7 +14,7 @@ class HttpClient {
 public:
     static bool downloadFile(
         std::string_view url,
-        const std::filesystem::path& destinationPath,
+        const PathArg& destinationPath,
         ProgressCallback onProgress = nullptr
     );
 };

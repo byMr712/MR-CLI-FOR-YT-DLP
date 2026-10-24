@@ -358,6 +358,24 @@ ParsedLineResult OutputParser::parseLine(std::string_view line, bool onlyAudio, 
         return result;
     }
 
+    if (line.find("Downloading webpage") != std::string_view::npos ||
+        line.find("Extracting URL:") != std::string_view::npos) {
+        result.event = LineEvent::PrepExtracting;
+        return result;
+    }
+
+    if (line.find("Downloading player") != std::string_view::npos ||
+        line.find("player API JSON") != std::string_view::npos ||
+        line.find("m3u8 information") != std::string_view::npos) {
+        result.event = LineEvent::PrepPlayer;
+        return result;
+    }
+
+    if (line.find("[info] ") == 0 && line.find("format(s)") != std::string_view::npos) {
+        result.event = LineEvent::PrepFormats;
+        return result;
+    }
+
     return result;
 }
 

@@ -9,6 +9,7 @@ namespace mrcli::services {
 class IDownloadObserver {
 public:
     virtual ~IDownloadObserver() = default;
+    virtual void onPreparationStep(int step) {}
     virtual void onProgress(const domain::ProgressInfo& info) = 0;
     virtual void onItemTransition(int current, int total) {}
     virtual void onMediaItemStarted(int current, int total, const std::string& name, bool isAudio) = 0;

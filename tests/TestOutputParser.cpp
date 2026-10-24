@@ -92,6 +92,21 @@ void testOutputParserAlreadyDownloaded() {
     std::cout << "[PASS] testOutputParserAlreadyDownloaded\n";
 }
 
+void testOutputParserPrepSteps() {
+    using namespace mrcli::services;
+
+    auto r1 = OutputParser::parseLine("[youtube] dQw4w9WgXcQ: Downloading webpage", false, false);
+    assert(r1.event == LineEvent::PrepExtracting);
+
+    auto r2 = OutputParser::parseLine("[youtube] dQw4w9WgXcQ: Downloading player 3f2956cf", false, false);
+    assert(r2.event == LineEvent::PrepPlayer);
+
+    auto r3 = OutputParser::parseLine("[info] dQw4w9WgXcQ: Downloading 1 format(s): 401+251", false, false);
+    assert(r3.event == LineEvent::PrepFormats);
+
+    std::cout << "[PASS] testOutputParserPrepSteps\n";
+}
+
 int main() {
     std::cout << "Running OutputParser tests...\n";
     testOutputParserProgress();
@@ -101,6 +116,7 @@ int main() {
     testOutputParserMergerQuotes();
     testOutputParserAlreadyInArchive();
     testOutputParserAlreadyDownloaded();
+    testOutputParserPrepSteps();
     std::cout << "All OutputParser tests passed successfully!\n";
     return 0;
 }

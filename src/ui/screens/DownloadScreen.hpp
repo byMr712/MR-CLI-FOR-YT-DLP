@@ -18,6 +18,7 @@ public:
                bool retry = false);
 
     // IDownloadObserver implementation
+    void onPreparationStep(int step) override;
     void onProgress(const domain::ProgressInfo& info) override;
     void onItemTransition(int current, int total) override;
     void onMediaItemStarted(int current, int total, const std::string& name, bool isAudio) override;
@@ -30,6 +31,7 @@ public:
 private:
     app::AppContext& m_ctx;
     bool m_progressActive = false;
+    bool m_prepStepsActive = false;
     bool m_hasOutputSinceLastTransition = false;
     int m_lastMediaItemIndex = 0;
     std::vector<std::string> m_skippedVideos;

@@ -18,6 +18,30 @@ void DownloadScreen::show() {
     start();
 }
 
+void DownloadScreen::onPreparationStep(int step) {
+    if (m_progressActive) return;
+    m_prepStepsActive = true;
+    m_hasOutputSinceLastTransition = true;
+    switch (step) {
+        case 1:
+            core::Console::print(m_ctx.loc->tr("[1/4] Initializing downloader and components...",
+                                               "[1/4] Инициализация загрузчика и компонентов..."), core::ConsoleColor::White);
+            break;
+        case 2:
+            core::Console::print(m_ctx.loc->tr("[2/4] Connecting to service and fetching metadata...",
+                                               "[2/4] Подключение к сервису и получение метаданных..."), core::ConsoleColor::White);
+            break;
+        case 3:
+            core::Console::print(m_ctx.loc->tr("[3/4] Decrypting player algorithms (QuickJS)...",
+                                               "[3/4] Расшифровка алгоритмов плеера (QuickJS)..."), core::ConsoleColor::White);
+            break;
+        case 4:
+            core::Console::print(m_ctx.loc->tr("[4/4] Analyzing and selecting best formats...",
+                                               "[4/4] Анализ и выбор наилучших форматов..."), core::ConsoleColor::White);
+            break;
+    }
+}
+
 void DownloadScreen::onProgress(const domain::ProgressInfo& info) {
     ProgressRenderer::renderProgressBar(info, m_ctx.loc->tr("ETA ", "Осталось "));
     m_progressActive = true;
@@ -40,6 +64,10 @@ void DownloadScreen::onMediaItemStarted(int current, int total, const std::strin
         std::cout << "\n";
         m_progressActive = false;
     }
+    if (m_prepStepsActive) {
+        std::cout << "\n";
+        m_prepStepsActive = false;
+    }
     if (total > 0 && current > 1 && m_lastMediaItemIndex > 0 && current != m_lastMediaItemIndex && m_hasOutputSinceLastTransition) {
         std::cout << "\n";
     }
@@ -59,6 +87,10 @@ void DownloadScreen::onVideoArchived(int current, int total, const std::string& 
     if (m_progressActive) {
         std::cout << "\n";
         m_progressActive = false;
+    }
+    if (m_prepStepsActive) {
+        std::cout << "\n";
+        m_prepStepsActive = false;
     }
     m_lastMediaItemIndex = current;
     m_hasOutputSinceLastTransition = true;
@@ -157,8 +189,7 @@ void DownloadScreen::start(const std::string& url,
         }
 
         core::Console::print("============================================", core::ConsoleColor::Cyan);
-        core::Console::print(retry ? m_ctx.loc->tr(" RETRYING DOWNLOAD", " ПОВТОРНАЯ ПОПЫТКА СКАЧИВАНИЯ") :
-                                     m_ctx.loc->tr(" STARTING DOWNLOAD", " НАЧАЛО СКАЧИВАНИЯ"), core::ConsoleColor::Cyan);
+        core::Console::print(m_ctx.loc->tr(" DOWNLOAD BY URL", " СКАЧИВАНИЕ ПО URL"), core::ConsoleColor::Cyan);
         core::Console::print("============================================", core::ConsoleColor::Cyan);
         std::cout << "\n" << m_ctx.loc->tr("Enter URL (Paste: Ctrl+V, Cancel: ESC):\n", "Введите URL (Вставка: Ctrl+V, Отмена: ESC):\n");
 
@@ -183,11 +214,16 @@ void DownloadScreen::start(const std::string& url,
                 m_ctx.loc->tr("Download entire playlist", "Скачать весь плейлист"),
                 m_ctx.loc->tr("Download only this video", "Скачать только это видео")
             };
-            int plChoice = Menu::arrowSelect(
-                m_ctx.loc->tr("PLAYLIST DETECTED", "ОБНАРУЖЕН ПЛЕЙЛИСТ"),
-                m_ctx.loc->tr("URL contains both a video and a playlist:\nChoose download mode:",
-                              "URL содержит и видео, и плейлист:\nВыберите режим скачивания:"),
-                plOptions, 0
+            std::cout << "\n";
+            m_ctx.logger->warn(m_ctx.loc->tr("[!] Playlist detected in URL: contains both a video and a playlist.",
+                                             "[!] В URL обнаружен плейлист: содержит и видео, и плейлист."));
+            int plChoice = Menu::inlineMenuSelect(
+                plOptions,
+                m_ctx.loc->tr(" Arrows to select, Enter to confirm, ESC to return",
+                              " Стрелки для выбора, Enter для подтверждения, ESC для возврата"),
+                "",
+                -1,
+                true
             );
             if (plChoice < 0) {
                 m_ctx.logger->warn(m_ctx.loc->tr("[INFO] Cancelled", "[ИНФО] Отменено"));
@@ -196,14 +232,17 @@ void DownloadScreen::start(const std::string& url,
             }
             if (plChoice == 0) {
                 isPl = true;
+                m_ctx.logger->info(m_ctx.loc->tr("[MODE] Download entire playlist", "[РЕЖИМ] Скачать весь плейлист"));
             } else {
                 size_t pos = u.find("&list=");
                 if (pos != std::string::npos) u = u.substr(0, pos);
                 isPl = false;
+                m_ctx.logger->info(m_ctx.loc->tr("[MODE] Download only this video", "[РЕЖИМ] Скачать только это видео"));
             }
         }
         else if (u.find("/playlist?list=") != std::string::npos || u.find("list=") != std::string::npos) {
             isPl = true;
+            m_ctx.logger->info(m_ctx.loc->tr("[MODE] Download entire playlist", "[РЕЖИМ] Скачать весь плейлист"));
         }
         else {
             isPl = false;
@@ -226,14 +265,12 @@ void DownloadScreen::start(const std::string& url,
         m_skippedVideos.clear();
     }
 
-    if (!retry) {
-        core::Console::clear();
-    }
+    std::cout << "\n";
     core::Console::print("============================================", core::ConsoleColor::Cyan);
     core::Console::print(retry ? m_ctx.loc->tr(" RETRYING DOWNLOAD...", " ПОВТОРНАЯ ПОПЫТКА СКАЧИВАНИЯ...") :
                                  m_ctx.loc->tr(" STARTING DOWNLOAD...", " НАЧАЛО СКАЧИВАНИЯ..."), core::ConsoleColor::Cyan);
     core::Console::print("============================================", core::ConsoleColor::Cyan);
-    std::cout << std::endl;
+    m_prepStepsActive = false;
 
     domain::DownloadOptions opts;
     opts.url = u;

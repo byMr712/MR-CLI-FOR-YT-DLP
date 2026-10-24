@@ -95,7 +95,7 @@ bool CookieService::saveEncryptedCookies(std::string_view netscapeContent) {
 bool CookieService::saveCookies(std::string_view netscapeContent) {
     std::string fullCookies = std::string(netscapeContent);
     if (fullCookies.find("# Netscape HTTP Cookie File") == std::string::npos && fullCookies.find("[") != 0) {
-        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.4\n\n" + fullCookies;
+        fullCookies = "# Netscape HTTP Cookie File\n# MR CLI FOR YT DLP v1.1.5\n\n" + fullCookies;
     }
 
     core::FileSystem::createDirectories(m_legacyTxtPath.parent_path());

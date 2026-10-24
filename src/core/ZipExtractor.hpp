@@ -1,18 +1,19 @@
 #pragma once
 #include <filesystem>
+#include "FileSystem.hpp"
 
 namespace mrcli::core {
 
 class ZipExtractor {
 public:
     static bool extract(
-        const std::filesystem::path& zipFilePath,
-        const std::filesystem::path& destinationDirectory
+        const PathArg& zipFilePath,
+        const PathArg& destinationDirectory
     );
 
     static bool extractZip(
-        const std::filesystem::path& zipFilePath,
-        const std::filesystem::path& destinationDirectory
+        const PathArg& zipFilePath,
+        const PathArg& destinationDirectory
     ) {
         return extract(zipFilePath, destinationDirectory);
     }
